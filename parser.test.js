@@ -101,3 +101,24 @@ test('looksLikeMoney separates unrelated texts from unreadable bank texts', () =
   assert.equal(looksLikeMoney('Meet at 5? Bring the JOD documents'), false);
   assert.equal(looksLikeMoney('Arab Bank: JOD 12.500 hold placed on card 1234'), true);
 });
+
+// Real Arab Bank (Jordan) format
+const ARAB_BANK = 'JO\nYou have a purchase transaction on account 0196*500 from AL MOALLEM AL AFGHANI RES amount JOD 10.000 on 08/11/2026 15:50 . Balance JOD 1016.126';
+test('Arab Bank purchase', () => {
+  const t = parseMessage(ARAB_BANK, { defaultCurrency: 'JOD', receivedAt: '2026-11-08T18:00:00Z' });
+  assert.equal(t.type, 'expense');
+  assert.equal(t.amount, 10);
+  assert.equal(t.currency, 'JOD');
+  assert.equal(t.merchant, 'AL MOALLEM AL AFGHANI RES');
+  assert.equal(t.category, 'Dining');
+  assert.equal(t.balance, 1016.126);
+  assert.equal(t.account, '500');
+});
+
+test('food words in merchant names', () => {
+  const cat = (m) => p(`Purchase of JOD 3.000 at ${m} on 03/11/2026`).category;
+  for (const m of ['HABIBAH SWEETS', 'ABU JBARA REST', 'AL QUDS FALAFEL', 'BURGERIZZR', 'REEM GRILL HOUSE', 'SEVEN BAKERY'])
+    assert.equal(cat(m), 'Dining', m);
+  assert.equal(cat('RESTAURANT ALDAR'), 'Dining');
+  assert.equal(cat('PRESTIGE AUTO'), 'Other'); // "res" inside a word is not food
+});

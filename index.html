@@ -148,6 +148,22 @@ button { cursor: pointer; }
 .balance .acct .a { font-size: 18px; font-weight: 650; text-align: right; }
 .balance .acct .d { grid-column: 1 / 3; margin: 0; }
 
+/* learn: merchants that need a category */
+.learn {
+  display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; margin-top: 12px;
+  border: 1px dashed var(--text-3); background: var(--surface); border-radius: var(--radius); padding: 14px 16px;
+}
+.learn .ic { font-size: 22px; }
+.learn .t1 { font-weight: 650; font-size: 15px; }
+.learn .t2 { font-size: 13px; color: var(--text-2); }
+.learn .go { margin-left: auto; font-weight: 650; color: var(--text); white-space: nowrap; }
+.sort-row { padding: 12px 0; border-bottom: 1px solid var(--grid); }
+.sort-row:last-child { border-bottom: 0; }
+.sort-row .t1 { font-weight: 650; font-size: 15px; }
+.sort-row .t2 { font-size: 13px; color: var(--text-3); margin-bottom: 8px; }
+.sort-row .chips { margin: 0 -20px; padding: 0 20px; }
+#sortList { max-height: 60vh; overflow: auto; }
+
 /* category bars */
 .cat {
   display: grid; grid-template-columns: 32px 1fr auto; gap: 4px 12px; align-items: center;
@@ -316,6 +332,8 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
       </div>
     </section>
 
+    <button class="learn" id="learnCard" hidden></button>
+
     <section class="card">
       <h2>Where it went <small id="catHint">Tap to filter</small></h2>
       <div id="cats"></div>
@@ -393,13 +411,23 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
       <div><label class="f" for="eCategory">Category</label><select id="eCategory"></select></div>
       <div><label class="f" for="eDate">Date</label><input id="eDate" type="datetime-local"></div>
     </div>
-    <label class="check" id="ruleWrap"><input type="checkbox" id="eRule"> <span id="ruleText">Always use this category for this merchant</span></label>
+    <label class="check" id="ruleWrap"><input type="checkbox" id="eRule" checked> <span id="ruleText">Always use this category for this merchant</span></label>
     <div class="raw" id="eRaw"></div>
     <div class="actions">
       <button type="button" class="btn danger" id="deleteTx">Delete</button>
       <button type="submit" class="btn primary" id="saveTx">Save</button>
     </div>
   </form>
+</dialog>
+
+<!-- Sort merchants into categories -->
+<dialog id="sortSheet">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>What are these?</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <p>Ledger couldn't tell what kind of place these are. Pick a category once and it's used for every payment there, past and future.</p>
+    <div id="sortList"></div>
+  </div>
 </dialog>
 
 <!-- Balance -->

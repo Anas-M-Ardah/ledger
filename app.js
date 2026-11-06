@@ -32,6 +32,18 @@
   let db = load();
   db.settings.rules = db.settings.rules || {};
   db.balances = db.balances || []; // balances you entered: { currency, account, amount, date }
+  if ((db.parserVersion || 1) < P.VERSION) {
+    for (const t of db.txns) {
+      if (!t.raw || t.edited) continue;
+      const n = P.parseMessage(t.raw, { defaultCurrency: t.currency, receivedAt: t.date });
+      if (!n || n.type !== t.type || n.amount !== t.amount) continue;
+      Object.assign(t, { merchant: n.merchant, category: n.category, account: n.account });
+      if (n.balance != null) t.balance = n.balance;
+      applyRules(t);
+    }
+    db.parserVersion = P.VERSION;
+    save();
+  }
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 
   const today = new Date();
@@ -179,6 +191,57 @@
     if (n) toast('Balance saved');
   });
 
+  // ---------- learning categories ----------
+  // Merchants Ledger couldn't place. Ask once; the answer becomes a rule for that merchant.
+  let sortGroups = [];
+  function unsorted(cur) {
+    const map = new Map();
+    for (const t of db.txns) {
+      if (t.currency !== cur || !t.merchant || (t.category !== 'Other' && t.category !== 'Other income')) continue;
+      const key = t.merchant.toLowerCase();
+      if (db.settings.rules[key]) continue; // you already decided, even if you chose "Other"
+      const id = t.type + '|' + key;
+      const g = map.get(id) || { key, name: t.merchant, type: t.type, count: 0, total: 0 };
+      g.count++; g.total += t.amount;
+      map.set(id, g);
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }
+  function renderLearn() {
+    const list = unsorted(state.currency);
+    const el = $('#learnCard');
+    el.hidden = !list.length;
+    if (!list.length) return;
+    const n = list.length;
+    el.innerHTML = `<span class="ic" aria-hidden="true">🏷️</span>
+      <span><span class="t1">${n === 1 ? `Is ${esc(list[0].name)} food, shopping…?` : `${n} places need a category`}</span><br>
+      <span class="t2">Tell Ledger once and it remembers</span></span><span class="go">Sort</span>`;
+  }
+  function renderSort() {
+    sortGroups = unsorted(state.currency);
+    if (!sortGroups.length) { sheets.sort.close(); return; }
+    $('#sortList').innerHTML = sortGroups.map((g, i) => `
+      <div class="sort-row"><div class="t1">${esc(g.name)}</div>
+        <div class="t2">${g.count} ${g.type === 'income' ? 'payment' : 'purchase'}${g.count === 1 ? '' : 's'} · ${money(g.total)}</div>
+        <div class="chips">${(g.type === 'income' ? INCOME_CATS : EXPENSE_CATS)
+          .map((c) => `<button class="chip" data-sort="${i}" data-c="${esc(c)}">${icon(c)} ${esc(c)}</button>`).join('')}</div>
+      </div>`).join('');
+  }
+  $('#learnCard').onclick = () => { renderSort(); open('sort'); };
+  $('#sortList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sort]');
+    if (!b) return;
+    e.stopPropagation();
+    const g = sortGroups[+b.dataset.sort];
+    db.settings.rules[g.key] = { category: b.dataset.c, type: g.type };
+    let n = 0;
+    for (const t of db.txns) if (t.merchant && t.merchant.toLowerCase() === g.key && t.type === g.type) { t.category = b.dataset.c; n++; }
+    save();
+    render();
+    renderSort();
+    toast(`${g.name} → ${b.dataset.c}${n > 1 ? ` (${n} payments)` : ''}. Future ones too`);
+  });
+
   // ---------- render ----------
   function render() {
     const has = db.txns.length > 0;
@@ -220,6 +283,7 @@
     $('#expD').textContent = delta(exp, pExp, 'expense');
 
     renderBalance();
+    renderLearn();
     renderCategories(month, exp);
     renderTrend(inCur);
     renderList(month);
@@ -340,7 +404,7 @@
   }
 
   // ---------- sheets ----------
-  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet') };
+  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet'), sort: $('#sortSheet') };
   function open(name) {
     if (name === 'add') { $('#addStep1').hidden = false; $('#addStep2').hidden = true; }
     if (name === 'settings') fillSettings();
@@ -444,7 +508,9 @@
     $('#eCurrency').value = editing.currency;
     const d = new Date(editing.date);
     $('#eDate').value = new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
-    $('#eRule').checked = false;
+    $('#eRule').checked = true;
+    $('#ruleText').textContent = `Always use this category for ${editing.merchant || 'this merchant'}`;
+    editing._origCategory = editing.category;
     $('#ruleWrap').hidden = !editing.merchant;
     $('#eRaw').textContent = editing.raw || '';
     $('#eRaw').hidden = !editing.raw;
@@ -456,13 +522,16 @@
     const amount = parseFloat($('#eAmount').value);
     if (!(amount > 0)) { toast('Enter an amount above zero'); return; }
     editing.type = editType;
+    editing.edited = true;
     editing.category = $('#eCategory').value;
     editing.merchant = $('#eMerchant').value.trim();
     editing.amount = amount;
     editing.currency = ($('#eCurrency').value || state.currency).toUpperCase().slice(0, 3);
     if ($('#eDate').value) editing.date = new Date($('#eDate').value).toISOString();
     let changed = 0;
-    if ($('#eRule').checked && editing.merchant) {
+    const catChanged = editing.category !== editing._origCategory;
+    delete editing._origCategory;
+    if ($('#eRule').checked && editing.merchant && catChanged) {
       const key = editing.merchant.toLowerCase();
       db.settings.rules[key] = { category: editing.category, type: editing.type };
       for (const t of db.txns) {
