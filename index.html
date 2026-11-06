@@ -132,6 +132,22 @@ button { cursor: pointer; }
 .card h2 small { font-size: 13px; font-weight: 500; color: var(--text-3); }
 .muted { color: var(--text-3); font-size: 14px; }
 
+/* balance */
+.balance {
+  display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface);
+  border-radius: var(--radius); padding: 14px 16px; margin-top: 8px; box-shadow: var(--shadow);
+}
+.balance .k { display: flex; justify-content: space-between; align-items: center; color: var(--text-2); font-size: 14px; }
+.balance .k .edit { color: var(--text-3); font-size: 13px; }
+.balance .v { font-size: clamp(24px, 7.5vw, 30px); font-weight: 700; letter-spacing: -.02em; margin-top: 2px; }
+.balance .v.unknown { font-size: 18px; font-weight: 600; color: var(--text-2); }
+.balance .d { font-size: 13px; color: var(--text-3); margin-top: 2px; }
+.balance .acct { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--grid); }
+.balance .acct:last-child { border-bottom: 0; padding-bottom: 0; }
+.balance .acct .n { font-size: 15px; }
+.balance .acct .a { font-size: 18px; font-weight: 650; text-align: right; }
+.balance .acct .d { grid-column: 1 / 3; margin: 0; }
+
 /* category bars */
 .cat {
   display: grid; grid-template-columns: 32px 1fr auto; gap: 4px 12px; align-items: center;
@@ -280,6 +296,7 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
   </header>
 
   <main id="dash">
+    <button class="balance" id="balanceCard" aria-label="Balance, tap to set"></button>
     <div class="month">
       <h1 id="monthLabel"></h1>
       <div class="nav">
@@ -381,6 +398,20 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
     <div class="actions">
       <button type="button" class="btn danger" id="deleteTx">Delete</button>
       <button type="submit" class="btn primary" id="saveTx">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Balance -->
+<dialog id="balanceSheet">
+  <form class="sheet" id="balanceForm" method="dialog">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Balance</h3><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <p>Ledger reads your balance from bank messages that include it. If yours don't, enter what your banking app shows right now and Ledger keeps it up to date from each new transaction.</p>
+    <div id="balanceInputs"></div>
+    <div class="actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
     </div>
   </form>
 </dialog>

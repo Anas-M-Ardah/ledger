@@ -5,7 +5,8 @@ Income and spending from your bank's SMS alerts. Nothing to type by hand. Privat
 - Reads English and Arabic bank messages (amount, currency, income or spending, merchant, date)
 - Skips OTP codes, declined transactions and balance amounts, and ignores duplicates
 - Sorts each transaction into a category automatically. Fix one and tick "always" to remember it for that merchant
-- Dashboard: what's left over, income and spending vs last month, where the money went, a 6-month trend, transactions
+- Balance: read from the SMS that include it ("Available balance …"), kept up to date between messages from the transactions in between, per account/card. If your bank never sends it, enter it once and Ledger takes it from there
+- Dashboard: balance, what's left over, income and spending vs last month, where the money went, a 6-month trend, transactions
 
 ## Use it on iPhone
 1. Host this folder on any HTTPS static host (e.g. GitHub Pages) and open it in Safari.

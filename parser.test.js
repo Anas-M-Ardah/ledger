@@ -73,3 +73,25 @@ test('splitMessages: blank lines and one-per-line', () => {
   assert.equal(splitMessages('Purchase JOD 1 at X\nPurchase JOD 2 at Y').length, 2);
   assert.equal(splitMessages('Purchase JOD 1 at X\ncontinued text').length, 1);
 });
+
+test('captures balance after the transaction', () => {
+  const t = p(cases[0][0]);
+  assert.equal(t.balance, 1240);
+  assert.equal(p(cases[1][0]).balance, 2190);
+  assert.equal(p(cases[3][0]).balance, 820); // Arabic: الرصيد المتاح
+  assert.equal(p(cases[4][0]).balance, 1320); // Arabic-Indic digits
+  assert.equal(p(cases[7][0]).balance, null); // no balance in message
+});
+
+test('balance in another currency is ignored', () => {
+  assert.equal(p('Purchase of USD 10.00 at STEAM. Available balance JOD 500.000').balance, null);
+});
+
+test('captures account / card last digits', () => {
+  assert.equal(p(cases[0][0]).account, '1234');
+  assert.equal(p(cases[2][0]).account, '4521');
+  assert.equal(p(cases[4][0]).account, '8812');
+  assert.equal(p(cases[6][0]).account, '9988');
+  assert.equal(p('Your account 0012345678 was debited JOD 5.000 at KFC').account, '5678');
+  assert.equal(p(cases[8][0]).account, ''); // "Ref 99812" is not an account
+});

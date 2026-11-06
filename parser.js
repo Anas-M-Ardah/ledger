@@ -197,6 +197,13 @@
     return type === 'income' ? 'Other income' : 'Other';
   }
 
+  // Last 4 digits of the card/account the message is about ("card ending 1234", "a/c XX4521", "حسابك رقم ***8812").
+  const RE_ACCOUNT = /(?:card|a\/c|acc(?:oun)?t?|ending|بطاقة|بطاقتك|البطاقة|حساب|حسابك|الحساب)[^\d\n]{0,20}?[*xX•.\s]*(\d{3,})(?!\d)/i;
+  function detectAccount(text) {
+    const m = RE_ACCOUNT.exec(text);
+    return m ? m[1].slice(-4) : '';
+  }
+
   const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
   function detectDate(text, fallback) {
@@ -239,12 +246,17 @@
     const type = detectType(text);
     if (!type) return null;
 
+    // Balance after this transaction, if the bank included it (same currency only).
+    const bal = amounts.find((a) => a.isBalance && a.index > txnAmount.index && a.currency === txnAmount.currency)
+      || amounts.find((a) => a.isBalance && a.currency === txnAmount.currency);
     const merchant = detectMerchant(text, type);
     return {
       id: hash(text),
       amount: Math.round(txnAmount.amount * 1000) / 1000,
       currency: txnAmount.currency,
       currencyGuessed: txnAmount.guessed,
+      balance: bal ? Math.round(bal.amount * 1000) / 1000 : null,
+      account: detectAccount(text),
       type,
       merchant,
       category: detectCategory(text, merchant, type),

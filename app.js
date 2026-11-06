@@ -31,6 +31,7 @@
 
   let db = load();
   db.settings.rules = db.settings.rules || {};
+  db.balances = db.balances || []; // balances you entered: { currency, account, amount, date }
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 
   const today = new Date();
@@ -102,6 +103,82 @@
   }
   const parseOpts = () => ({ defaultCurrency: db.settings.currency, receivedAt: new Date().toISOString() });
 
+  // ---------- balance ----------
+  // Latest known balance (from an SMS that included it, or one you entered), plus every transaction after it.
+  // Kept per account (card/account last digits); messages without digits count toward your main account.
+  const round3 = (x) => Math.round(x * 1000) / 1000;
+  function balances(cur) {
+    const txns = db.txns.filter((t) => t.currency === cur);
+    const manual = db.balances.filter((b) => b.currency === cur);
+    const counts = {};
+    for (const t of txns) if (t.account) counts[t.account] = (counts[t.account] || 0) + 1;
+    for (const b of manual) if (b.account && !(b.account in counts)) counts[b.account] = 0;
+    const accounts = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    const main = accounts[0] || '';
+    const groups = {};
+    for (const a of accounts.length ? accounts : ['']) groups[a] = { account: a, txns: [], readings: [] };
+    const groupOf = (acc) => groups[acc || main] || groups[main];
+    for (const t of txns) {
+      const g = groupOf(t.account);
+      g.txns.push(t);
+      if (t.balance != null) g.readings.push({ amount: t.balance, date: t.date, source: 'sms', id: t.id });
+    }
+    for (const b of manual) groupOf(b.account).readings.push({ amount: b.amount, date: b.date, source: 'manual' });
+    return Object.values(groups).map((g) => {
+      const r = g.readings.sort((a, b) => new Date(b.date) - new Date(a.date) || (a.source === 'manual' ? -1 : 1))[0];
+      if (!r) return { account: g.account, balance: null };
+      const after = g.txns.filter((t) => t.id !== r.id && new Date(t.date) > new Date(r.date));
+      const delta = after.reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
+      return { account: g.account, balance: round3(r.amount + delta), reading: r, since: after.length };
+    });
+  }
+  const acctName = (b, many) => (b.account ? `Account ··${b.account}` : many ? 'Other' : 'Balance');
+  function balanceNote(b) {
+    if (b.balance === null) return 'Fills in when a bank message includes your balance. Tap to enter it';
+    const d = new Date(b.reading.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const src = b.reading.source === 'sms' ? `From bank SMS on ${d}` : `Set by you on ${d}`;
+    return b.since ? `${src} · ${b.since} transaction${b.since === 1 ? '' : 's'} since` : src;
+  }
+  function renderBalance() {
+    const list = balances(state.currency);
+    const el = $('#balanceCard');
+    if (list.length === 1) {
+      const b = list[0];
+      el.innerHTML = `<div class="k"><span>${b.account ? `Balance · ··${b.account}` : 'Balance'}</span><span class="edit">${b.balance === null ? 'Set' : 'Edit'}</span></div>
+        ${b.balance === null ? '<div class="v unknown">Not known yet</div>' : `<div class="v num">${money(b.balance)}</div>`}
+        <div class="d">${esc(balanceNote(b))}</div>`;
+    } else {
+      el.innerHTML = `<div class="k"><span>Balances</span><span class="edit">Edit</span></div>` + list.map((b) => `
+        <div class="acct"><span class="n">${esc(acctName(b, true))}</span>
+        <span class="a num">${b.balance === null ? '—' : money(b.balance)}</span>
+        <span class="d">${esc(balanceNote(b))}</span></div>`).join('');
+    }
+  }
+  function openBalance() {
+    const list = balances(state.currency);
+    $('#balanceInputs').innerHTML = list.map((b, i) => `
+      <label class="f" for="bal${i}">${esc(acctName(b, list.length > 1))} (${state.currency}) right now</label>
+      <input id="bal${i}" data-account="${esc(b.account)}" data-was="${b.balance ?? ''}" type="number" inputmode="decimal" step="any"
+        value="${b.balance ?? ''}" placeholder="e.g. 1240.500">`).join('');
+    open('balance');
+  }
+  $('#balanceCard').onclick = openBalance;
+  $('#balanceForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    let n = 0;
+    for (const inp of $$('#balanceInputs input')) {
+      if (inp.value === '') continue;
+      const v = parseFloat(inp.value);
+      if (!isFinite(v) || (inp.dataset.was !== '' && Math.abs(v - +inp.dataset.was) < 0.0005)) continue;
+      db.balances.push({ currency: state.currency, account: inp.dataset.account, amount: round3(v), date: new Date().toISOString() });
+      n++;
+    }
+    save();
+    sheets.balance.close();
+    render();
+    if (n) toast('Balance saved');
+  });
+
   // ---------- render ----------
   function render() {
     const has = db.txns.length > 0;
@@ -142,6 +219,7 @@
     $('#incD').textContent = delta(inc, pInc, 'income');
     $('#expD').textContent = delta(exp, pExp, 'expense');
 
+    renderBalance();
     renderCategories(month, exp);
     renderTrend(inCur);
     renderList(month);
@@ -262,7 +340,7 @@
   }
 
   // ---------- sheets ----------
-  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet') };
+  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet') };
   function open(name) {
     if (name === 'add') { $('#addStep1').hidden = false; $('#addStep2').hidden = true; }
     if (name === 'settings') fillSettings();
@@ -440,6 +518,10 @@
       if (!Array.isArray(data.txns)) throw new Error('bad file');
       const n = addTxns(data.txns.filter((t) => t && t.id && t.amount > 0 && t.date));
       Object.assign(db.settings.rules, (data.settings && data.settings.rules) || {});
+      const have = new Set(db.balances.map((b) => b.currency + b.account + b.date));
+      for (const b of Array.isArray(data.balances) ? data.balances : []) {
+        if (b && b.currency && isFinite(b.amount) && b.date && !have.has(b.currency + b.account + b.date)) db.balances.push(b);
+      }
       save(); render(); fillSettings();
       toast(`Imported ${n} new transaction${n === 1 ? '' : 's'}`);
     } catch (err) { toast("That file isn't a Ledger backup"); }
@@ -448,6 +530,7 @@
   $('#clearBtn').onclick = () => {
     if (!confirm('Erase all transactions from this device? Export a backup first if you might need them.')) return;
     db.txns = [];
+    db.balances = [];
     db.settings.rules = {};
     save(); render(); fillSettings();
     toast('All data erased');
@@ -467,7 +550,7 @@
     const fmt = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     const rnd = (a, b) => Math.round((a + Math.random() * (b - a)) * 100) / 100;
     const templates = [
-      ['Purchase of {c} {a} at CARREFOUR CITY MALL on {d}. Available balance {c} 1,240.00', 35, 95, 5],
+      ['Purchase of {c} {a} at CARREFOUR CITY MALL with card ending 4821 on {d}', 35, 95, 5],
       ['Purchase of {c} {a} at STARBUCKS on {d}', 3, 9, 7],
       ['Purchase of {c} {a} at TALABAT on {d}', 8, 24, 5],
       ['Your card was debited {c} {a} at TOTAL FUEL STATION on {d}', 20, 40, 3],
@@ -479,21 +562,27 @@
       ['ATM cash withdrawal of {c} {a} on {d}', 40, 100, 1],
       ['Purchase of {c} {a} at CITY PHARMACY on {d}', 5, 30, 1],
     ];
-    const msgs = [];
+    const events = []; // [date, template, amount, isIncome]
     for (let back = 3; back >= 0; back--) {
       const m = new Date(now.getFullYear(), now.getMonth() - back, 1);
       const lastDay = back === 0 ? now.getDate() : new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
-      const at = (day) => { const d = new Date(m.getFullYear(), m.getMonth(), Math.min(day, lastDay), 8 + Math.floor(Math.random() * 13), Math.floor(Math.random() * 60)); return d; };
-      msgs.push(`Your account has been credited with ${cur} ${(1450).toFixed(2)} SALARY from ACME TRADING on ${fmt(at(1))}`);
-      if (Math.random() > .4) msgs.push(`Transfer received ${cur} ${rnd(50, 200).toFixed(2)} from SARA K. on ${fmt(at(1 + Math.floor(Math.random() * 27)))}`);
+      const at = (day) => new Date(m.getFullYear(), m.getMonth(), Math.min(day, lastDay), 8 + Math.floor(Math.random() * 13), Math.floor(Math.random() * 60));
+      events.push([at(1), 'Your account 4821 has been credited with {c} {a} SALARY from ACME TRADING on {d}', 1450, true]);
+      if (Math.random() > .4) events.push([at(1 + Math.floor(Math.random() * 27)), 'Transfer received {c} {a} from SARA K. to account 4821 on {d}', rnd(50, 200), true]);
       for (const [tpl, lo, hi, n] of templates) {
         const count = Math.max(0, Math.round(back === 0 ? (n * lastDay) / 30 : n));
-        for (let k = 0; k < count; k++) {
-          const d = at(1 + Math.floor(Math.random() * lastDay));
-          msgs.push(tpl.replace(/\{c\}/g, cur).replace('{a}', rnd(lo, hi).toFixed(2)).replace('{d}', fmt(d)));
-        }
+        for (let k = 0; k < count; k++) events.push([at(1 + Math.floor(Math.random() * lastDay)), tpl, rnd(lo, hi), false]);
       }
     }
+    events.sort((a, b) => a[0] - b[0]);
+    let running = 1180;
+    const msgs = events.map(([d, tpl, amt, isIncome]) => {
+      running = Math.round((running + (isIncome ? amt : -amt)) * 100) / 100;
+      // Like real banks, not every SMS states the balance.
+      const bal = Math.random() < .7 ? `. Available balance {c} ${running.toFixed(2)}` : '';
+      return (tpl + bal).replace(/\{c\}/g, cur).replace('{a}', amt.toFixed(2)).replace('{d}', fmt(d));
+    });
+    window.__sampleFinalBalance = running; // for tests
     const list = msgs.map((s) => P.parseMessage(s, parseOpts())).filter(Boolean).map((t) => ({ ...t, sample: true }));
     const n = addTxns(list);
     state.currency = cur;
