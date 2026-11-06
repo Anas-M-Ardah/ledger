@@ -6,8 +6,9 @@
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
   const KEY = 'ledger.v1';
   const CURRENCIES = ['JOD', 'USD', 'SAR', 'AED', 'EGP', 'KWD', 'QAR', 'BHD', 'OMR', 'EUR', 'GBP', 'TRY', 'MAD', 'ILS', 'INR'];
-  const EXPENSE_CATS = [...P.CATEGORIES.expense.map((c) => c[0]), 'Other'];
-  const INCOME_CATS = [...P.CATEGORIES.income.map((c) => c[0]), 'Other income'];
+  const BASE_CATS = { expense: P.CATEGORIES.expense.map((c) => c[0]), income: P.CATEGORIES.income.map((c) => c[0]) };
+  // Built-in categories, then your own, then "Other" last.
+  const catsFor = (type) => [...BASE_CATS[type], ...((db.settings.customCats || {})[type] || []), type === 'income' ? 'Other income' : 'Other'];
 
   // ---------- storage ----------
   let memory = null;
@@ -70,7 +71,7 @@
   const monthName = (d, style = 'long') => d.toLocaleDateString(undefined, { month: style });
   const sameMonth = (iso, m) => { const d = new Date(iso); return d.getFullYear() === m.getFullYear() && d.getMonth() === m.getMonth(); };
   const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
-  const icon = (cat) => P.CATEGORY_ICONS[cat] || '•';
+  const icon = (cat) => P.CATEGORY_ICONS[cat] || '🏷️';
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const label = (t) => t.merchant || (t.type === 'income' ? 'Money in' : t.category === 'Other' ? 'Card payment' : t.category);
 
@@ -191,6 +192,108 @@
     if (n) toast('Balance saved');
   });
 
+  // ---------- recategorising ----------
+  // Put every payment from a place into a category, now and in future.
+  function applyToPlace(key, type, category) {
+    db.settings.rules[key] = { category, type };
+    let n = 0;
+    for (const t of db.txns) if (t.merchant && t.merchant.toLowerCase() === key && t.type === type) { t.category = category; n++; }
+    save();
+    return n;
+  }
+  function newCategory(type) {
+    const name = (prompt('Name your new category (e.g. Kids, Car, Gym)') || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+    if (!name) return null;
+    const existing = catsFor(type).find((c) => c.toLowerCase() === name.toLowerCase());
+    if (existing) return existing;
+    db.settings.customCats = db.settings.customCats || { expense: [], income: [] };
+    (db.settings.customCats[type] = db.settings.customCats[type] || []).push(name);
+    save();
+    return name;
+  }
+
+  // Picker opened from a transaction ({ id }) or from the places list ({ key, type, name }).
+  let pick = null;
+  function openPick(target) {
+    if (target.id) {
+      const t = db.txns.find((x) => x.id === target.id);
+      if (!t) return;
+      pick = { id: t.id, key: t.merchant ? t.merchant.toLowerCase() : null, type: t.type, name: label(t), current: t.category };
+      const d = new Date(t.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      $('#pkSub').textContent = `${t.type === 'income' ? '+' : '−'}${money(t.amount, t.currency)} · ${d}`;
+    } else {
+      const t = db.txns.find((x) => x.merchant && x.merchant.toLowerCase() === target.key && x.type === target.type);
+      pick = { key: target.key, type: target.type, name: target.name, current: t ? t.category : null };
+      $('#pkSub').textContent = 'Applies to every payment here';
+    }
+    $('#pkTitle').textContent = pick.name;
+    const others = pick.key ? db.txns.filter((t) => t.merchant && t.merchant.toLowerCase() === pick.key && t.type === pick.type).length : 0;
+    $('#pkAllWrap').hidden = !pick.id || !pick.key;
+    $('#pkAll').checked = true;
+    $('#pkAllText').textContent = others > 1 ? `All ${others} payments from ${pick.name}, and future ones` : `Future payments from ${pick.name} too`;
+    $('#pkActions').hidden = !pick.id;
+    renderPickGrid();
+    open('pick');
+  }
+  function renderPickGrid() {
+    $('#pkGrid').innerHTML = catsFor(pick.type).map((c) =>
+      `<button type="button" data-pick="${esc(c)}" aria-pressed="${c === pick.current}"><span class="e" aria-hidden="true">${icon(c)}</span><span>${esc(c)}</span></button>`).join('')
+      + '<button type="button" class="new" data-pick-new><span class="e" aria-hidden="true">＋</span><span>New category</span></button>';
+  }
+  $('#pkGrid').addEventListener('click', (e) => {
+    let c = null;
+    if (e.target.closest('[data-pick-new]')) { c = newCategory(pick.type); if (!c) return; }
+    else { const b = e.target.closest('[data-pick]'); if (!b) return; c = b.dataset.pick; }
+    let msg;
+    if (pick.key && (!pick.id || $('#pkAll').checked)) {
+      const n = applyToPlace(pick.key, pick.type, c);
+      msg = `${pick.name} → ${c}${n > 1 ? ` · ${n} payments` : ''}. Future ones too`;
+    } else {
+      const t = db.txns.find((x) => x.id === pick.id);
+      t.category = c; t.edited = true; save();
+      msg = `Moved to ${c}`;
+    }
+    sheets.pick.close();
+    render();
+    if (sheets.places.open) renderPlaces();
+    toast(msg);
+  });
+  $('#pkEdit').onclick = () => { const id = pick.id; sheets.pick.close(); openEdit(id); };
+
+  // Places: every merchant with its category, guessed or chosen.
+  function renderPlaces() {
+    const q = $('#placesSearch').value.trim().toLowerCase();
+    const map = new Map();
+    for (const t of db.txns) {
+      if (!t.merchant) continue;
+      const key = t.merchant.toLowerCase();
+      const id = t.type + '|' + key;
+      const g = map.get(id) || { key, name: t.merchant, type: t.type, count: 0, total: 0, currency: t.currency, category: t.category, last: t.date };
+      g.count++;
+      if (t.currency === g.currency) g.total += t.amount;
+      if (t.date > g.last) { g.last = t.date; g.category = t.category; }
+      map.set(id, g);
+    }
+    const list = [...map.values()].filter((g) => !q || g.key.includes(q) || g.category.toLowerCase().includes(q))
+      .sort((a, b) => b.count - a.count || b.total - a.total);
+    $('#placesList').innerHTML = list.length ? list.map((g) => {
+      const chosen = !!db.settings.rules[g.key];
+      return `<button class="place" data-key="${esc(g.key)}" data-type="${g.type}" data-name="${esc(g.name)}">
+        <span class="t1">${esc(g.name)}</span>
+        <span class="pill${chosen ? '' : ' guess'}">${icon(g.category)} ${esc(g.category)}</span>
+        <span class="t2">${g.count} ${g.type === 'income' ? 'in' : 'payment'}${g.count === 1 || g.type === 'income' ? '' : 's'} · ${money(g.total, g.currency)}${chosen ? '' : ' · guessed'}</span>
+      </button>`;
+    }).join('') : `<p class="muted">${q ? 'No places match.' : 'No places yet. Add some bank messages first.'}</p>`;
+  }
+  function openPlaces() { $('#placesSearch').value = ''; renderPlaces(); open('places'); }
+  $('#placesBtn').onclick = openPlaces;
+  $('#placesBtn2').onclick = () => { sheets.settings.close(); openPlaces(); };
+  $('#placesSearch').addEventListener('input', renderPlaces);
+  $('#placesList').addEventListener('click', (e) => {
+    const b = e.target.closest('.place');
+    if (b) openPick({ key: b.dataset.key, type: b.dataset.type, name: b.dataset.name });
+  });
+
   // ---------- learning categories ----------
   // Merchants Ledger couldn't place. Ask once; the answer becomes a rule for that merchant.
   let sortGroups = [];
@@ -223,7 +326,7 @@
     $('#sortList').innerHTML = sortGroups.map((g, i) => `
       <div class="sort-row"><div class="t1">${esc(g.name)}</div>
         <div class="t2">${g.count} ${g.type === 'income' ? 'payment' : 'purchase'}${g.count === 1 ? '' : 's'} · ${money(g.total)}</div>
-        <div class="chips">${(g.type === 'income' ? INCOME_CATS : EXPENSE_CATS)
+        <div class="chips">${catsFor(g.type)
           .map((c) => `<button class="chip" data-sort="${i}" data-c="${esc(c)}">${icon(c)} ${esc(c)}</button>`).join('')}</div>
       </div>`).join('');
   }
@@ -293,7 +396,6 @@
     const by = {};
     for (const t of month) if (t.type === 'expense') by[t.category] = (by[t.category] || 0) + t.amount;
     const rows = Object.entries(by).sort((a, b) => b[1] - a[1]);
-    $('#catHint').hidden = !rows.length;
     if (!rows.length) { $('#cats').innerHTML = '<p class="muted">No spending this month.</p>'; return; }
     const max = rows[0][1];
     $('#cats').innerHTML = rows.map(([cat, v]) => {
@@ -404,7 +506,7 @@
   }
 
   // ---------- sheets ----------
-  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet'), sort: $('#sortSheet') };
+  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet'), sort: $('#sortSheet'), pick: $('#pickSheet'), places: $('#placesSheet') };
   function open(name) {
     if (name === 'add') { $('#addStep1').hidden = false; $('#addStep2').hidden = true; }
     if (name === 'settings') fillSettings();
@@ -491,7 +593,7 @@
   function setEditType(type) {
     editType = type;
     $$('#editSheet [data-type]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.type === type));
-    const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
+    const cats = catsFor(type);
     const cur = $('#eCategory').value;
     $('#eCategory').innerHTML = cats.map((c) => `<option value="${esc(c)}">${icon(c)} ${esc(c)}</option>`).join('');
     $('#eCategory').value = cats.includes(cur) ? cur : cats[cats.length - 1];
@@ -670,7 +772,7 @@
     const cat = e.target.closest('.cat');
     if (cat) { state.category = state.category === cat.dataset.cat ? null : cat.dataset.cat; render(); return; }
     const tx = e.target.closest('.tx');
-    if (tx) { openEdit(tx.dataset.id); return; }
+    if (tx) { openPick({ id: tx.dataset.id }); return; }
     if (e.target.id === 'clearFilter') { state.category = null; render(); return; }
     if (e.target.id === 'showMore') { state.showAll = true; render(); }
   });
@@ -708,6 +810,7 @@
     if (!text) return;
     try { text = decodeURIComponent(text.replace(/\+/g, ' ')); } catch (e) {}
     history.replaceState(null, '', location.pathname);
+    Object.values(sheets).forEach((d) => d.open && d.close()); // show the dashboard for the new message
     const t = P.parseMessage(text, parseOpts());
     if (!t) {
       // The automation also fires for unrelated texts containing its keyword. Skip those quietly;

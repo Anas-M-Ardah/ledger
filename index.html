@@ -164,6 +164,30 @@ button { cursor: pointer; }
 .sort-row .chips { margin: 0 -20px; padding: 0 20px; }
 #sortList { max-height: 60vh; overflow: auto; }
 
+/* category picker + places */
+.link { border: 0; background: none; color: var(--text-2); font-size: 13px; font-weight: 650; padding: 4px 0; }
+.pick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 4px; }
+.pick-grid button {
+  border: 1px solid var(--border); background: var(--bg); border-radius: 14px; padding: 12px 6px;
+  display: grid; gap: 4px; justify-items: center; font-size: 13px; color: var(--text); min-width: 0;
+}
+.pick-grid button span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-grid button .e { font-size: 22px; line-height: 1; }
+.pick-grid button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 650; }
+.pick-grid button.new { border-style: dashed; color: var(--text-2); }
+.pick-head h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-head > div { min-width: 0; }
+.place {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: center; width: 100%;
+  padding: 11px 0; border: 0; border-bottom: 1px solid var(--grid); background: none; text-align: left;
+}
+.place .t1 { font-size: 15px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place .t2 { font-size: 13px; color: var(--text-3); }
+.place .pill { grid-row: span 2; font-size: 13px; border-radius: 999px; padding: 5px 10px; background: var(--surface-2); white-space: nowrap; }
+.place .pill.guess { background: transparent; border: 1px dashed var(--text-3); color: var(--text-2); }
+.place > span:first-child, .place > span:nth-child(3) { min-width: 0; }
+#placesList { max-height: 58vh; overflow: auto; margin-top: 10px; }
+
 /* category bars */
 .cat {
   display: grid; grid-template-columns: 32px 1fr auto; gap: 4px 12px; align-items: center;
@@ -335,7 +359,7 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
     <button class="learn" id="learnCard" hidden></button>
 
     <section class="card">
-      <h2>Where it went <small id="catHint">Tap to filter</small></h2>
+      <h2>Where it went <button class="link" id="placesBtn">Fix categories ›</button></h2>
       <div id="cats"></div>
     </section>
 
@@ -420,6 +444,28 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
   </form>
 </dialog>
 
+<!-- Category picker -->
+<dialog id="pickSheet">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head pick-head"><div><h3 id="pkTitle"></h3><div class="muted" id="pkSub"></div></div><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="pick-grid" id="pkGrid"></div>
+    <label class="check" id="pkAllWrap"><input type="checkbox" id="pkAll" checked> <span id="pkAllText"></span></label>
+    <div class="actions" id="pkActions"><button class="btn" id="pkEdit">Edit amount, date…</button></div>
+  </div>
+</dialog>
+
+<!-- Places -->
+<dialog id="placesSheet">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Places</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <p>Every place you've paid or been paid by. <b>Dashed</b> means Ledger guessed. Tap to set the right category for all of its payments.</p>
+    <input id="placesSearch" type="search" placeholder="Search places" autocomplete="off">
+    <div id="placesList"></div>
+  </div>
+</dialog>
+
 <!-- Sort merchants into categories -->
 <dialog id="sortSheet">
   <div class="sheet">
@@ -468,6 +514,12 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
       </ol>
       <p class="muted">Other texts that happen to contain your word are ignored: Ledger only keeps messages it can read as a transaction.</p>
       <p class="muted">Tip: the automation opens Ledger in Safari, so use Ledger in Safari (bookmark it) for your data to stay in one place. Home-screen apps on iPhone keep separate storage.</p>
+    </div>
+
+    <div class="section">
+      <h4>Categories</h4>
+      <p>Wrong guess? Fix it once per place and Ledger remembers. You can also make your own categories from the picker.</p>
+      <button class="btn sm" id="placesBtn2">Review places &amp; categories</button>
     </div>
 
     <div class="section">
