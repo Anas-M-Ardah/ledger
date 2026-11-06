@@ -282,7 +282,10 @@
     return splitMessages(bulk).map((raw) => ({ raw, txn: parseMessage(raw, opts) }));
   }
 
-  const api = { parseMessage, parseBulk, splitMessages, normalize, CATEGORIES, CATEGORY_ICONS };
+  // True if the text mentions an amount of money at all (used to tell "not a bank message" from "couldn't read").
+  const looksLikeMoney = (text) => findAmounts(normalize(text), 'USD').length > 0;
+
+  const api = { parseMessage, parseBulk, splitMessages, looksLikeMoney, normalize, CATEGORIES, CATEGORY_ICONS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LedgerParser = api;
 })(typeof self !== 'undefined' ? self : this);

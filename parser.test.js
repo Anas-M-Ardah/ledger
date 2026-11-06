@@ -95,3 +95,9 @@ test('captures account / card last digits', () => {
   assert.equal(p('Your account 0012345678 was debited JOD 5.000 at KFC').account, '5678');
   assert.equal(p(cases[8][0]).account, ''); // "Ref 99812" is not an account
 });
+
+test('looksLikeMoney separates unrelated texts from unreadable bank texts', () => {
+  const { looksLikeMoney } = require('./parser.js');
+  assert.equal(looksLikeMoney('Meet at 5? Bring the JOD documents'), false);
+  assert.equal(looksLikeMoney('Arab Bank: JOD 12.500 hold placed on card 1234'), true);
+});

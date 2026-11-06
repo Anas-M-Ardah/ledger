@@ -641,6 +641,9 @@
     history.replaceState(null, '', location.pathname);
     const t = P.parseMessage(text, parseOpts());
     if (!t) {
+      // The automation also fires for unrelated texts containing its keyword. Skip those quietly;
+      // only bring up the paste screen when the message mentions money but couldn't be read.
+      if (!P.looksLikeMoney(text)) { if (db.txns.length) toast('Not a bank transaction, nothing added'); return; }
       $('#pasteBox').value = text;
       open('add');
       toast("Couldn't read that one. Check it below");
