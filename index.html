@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ledger</title>
+<meta name="description" content="Track income and spending from your bank's SMS alerts. Private, offline, on your phone.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f5f2;
+  --surface: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e4e2dc;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #7c7b76;
+  --grid: #e9e7e2;
+  --income: #2a78d6;
+  --expense: #eb6834;
+  --accent: #0b0b0b;
+  --accent-ink: #fcfcfb;
+  --good: #006300;
+  --bad: #b3261e;
+  --shadow: 0 1px 2px rgba(20, 20, 18, .04), 0 6px 24px rgba(20, 20, 18, .06);
+  --radius: 20px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121211;
+    --surface: #1a1a19;
+    --surface-2: #242422;
+    --border: #2e2e2b;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --text-3: #8e8d86;
+    --grid: #2a2a28;
+    --income: #3987e5;
+    --expense: #d95926;
+    --accent: #f0efec;
+    --accent-ink: #121211;
+    --good: #5cc45c;
+    --bad: #f2867f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211; --surface: #1a1a19; --surface-2: #242422; --border: #2e2e2b;
+  --text: #f0efec; --text-2: #c3c2b7; --text-3: #8e8d86; --grid: #2a2a28;
+  --income: #3987e5; --expense: #d95926; --accent: #f0efec; --accent-ink: #121211;
+  --good: #5cc45c; --bad: #f2867f; --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, "Noto Sans Arabic", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; }
+
+.app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 112px);
+}
+
+/* header */
+.top { display: flex; align-items: center; justify-content: space-between; height: 44px; }
+.brand { font-weight: 700; font-size: 17px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+.brand svg { width: 22px; height: 22px; }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 50%; border: 0; background: transparent;
+  display: grid; place-items: center; color: var(--text-2);
+}
+.icon-btn:active { background: var(--surface-2); }
+.icon-btn svg { width: 22px; height: 22px; }
+
+.month { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 4px; }
+.month h1 { margin: 0; font-size: 28px; letter-spacing: -.02em; font-weight: 700; }
+.month h1 span { color: var(--text-3); font-weight: 500; }
+.month .nav { display: flex; gap: 4px; }
+
+.chips { display: flex; gap: 8px; overflow-x: auto; margin: 8px -16px 0; padding: 0 16px; scrollbar-width: none; }
+.chips:empty { display: none; }
+.chip {
+  border: 1px solid var(--border); background: var(--surface); border-radius: 999px;
+  padding: 6px 12px; font-size: 14px; white-space: nowrap; color: var(--text-2);
+}
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* hero */
+.hero { margin: 20px 0 16px; }
+.hero .label { color: var(--text-2); font-size: 15px; }
+.hero .big { font-size: clamp(32px, 10.5vw, 44px); font-weight: 700; letter-spacing: -.03em; line-height: 1.1; margin: 2px 0 4px; }
+.hero .sub { color: var(--text-3); font-size: 14px; }
+.tiles { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 16px; }
+.tile {
+  background: var(--surface); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+.tile .k { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 14px; }
+.tile .v { font-size: clamp(17px, 5.4vw, 22px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 650; letter-spacing: -.02em; margin-top: 4px; }
+.tile .d { font-size: 13px; color: var(--text-3); margin-top: 2px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.swatch.inc { background: var(--income); }
+.swatch.exp { background: var(--expense); }
+
+/* cards */
+.card {
+  background: var(--surface); border-radius: var(--radius); padding: 18px 16px; margin-top: 12px;
+  box-shadow: var(--shadow); border: 1px solid var(--border);
+}
+.card h2 { margin: 0 0 14px; font-size: 17px; font-weight: 650; letter-spacing: -.01em; display: flex; justify-content: space-between; align-items: baseline; }
+.card h2 small { font-size: 13px; font-weight: 500; color: var(--text-3); }
+.muted { color: var(--text-3); font-size: 14px; }
+
+/* category bars */
+.cat {
+  display: grid; grid-template-columns: 32px 1fr auto; gap: 4px 12px; align-items: center;
+  padding: 8px 0; border: 0; background: none; width: 100%; text-align: left;
+}
+.cat .ic { grid-row: span 2; width: 32px; height: 32px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; font-size: 16px; }
+.cat .nm { font-size: 15px; }
+.cat .am { font-size: 15px; font-weight: 600; text-align: right; }
+.cat .track { grid-column: 2 / 4; height: 8px; display: flex; align-items: center; }
+.cat .bar { height: 8px; border-radius: 4px; background: var(--expense); min-width: 4px; transition: width .4s ease; }
+.cat .pct { grid-column: 3; grid-row: 1; }
+.cat[aria-pressed="true"] .nm { font-weight: 650; }
+.cat.dim { opacity: .45; }
+
+/* trend */
+.legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-2); margin: -4px 0 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.trend { position: relative; height: 200px; touch-action: pan-y; }
+.trend svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.trend .axis { font-size: 11px; fill: var(--text-3); }
+.trend .axis.sel { fill: var(--text); font-weight: 650; }
+.tip {
+  position: absolute; top: 0; pointer-events: none; background: var(--text); color: var(--surface);
+  border-radius: 12px; padding: 8px 10px; font-size: 13px; line-height: 1.45; white-space: nowrap;
+  transform: translateX(-50%); opacity: 0; transition: opacity .12s; z-index: 2;
+}
+.tip.on { opacity: 1; }
+.tip b { font-weight: 650; }
+.tip .row { display: flex; align-items: center; gap: 6px; }
+
+/* transactions */
+.filter-note { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--text-2); background: var(--surface-2); border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; }
+.filter-note button { border: 0; background: none; color: var(--text); font-weight: 600; }
+.day { font-size: 13px; color: var(--text-3); font-weight: 600; margin: 14px 0 2px; text-transform: uppercase; letter-spacing: .04em; }
+.day:first-child { margin-top: 0; }
+.tx {
+  display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; width: 100%;
+  padding: 10px 0; border: 0; background: none; text-align: left; border-bottom: 1px solid var(--grid);
+}
+.tx:last-child { border-bottom: 0; }
+.tx .ic { width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; font-size: 18px; }
+.tx .t1 { font-size: 15px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx .t2 { font-size: 13px; color: var(--text-3); }
+.tx .amt { font-size: 15px; font-weight: 600; text-align: right; }
+.tx .amt.in::before { content: "+"; }
+.tx .amt.out::before { content: "−"; }
+.tx > div { min-width: 0; }
+.more { width: 100%; margin-top: 8px; border: 0; background: var(--surface-2); border-radius: 12px; padding: 10px; font-weight: 600; color: var(--text-2); }
+
+/* empty state */
+.empty { text-align: center; padding: 40px 8px 8px; }
+.empty .art { width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 22px; background: var(--surface); border: 1px solid var(--border); display: grid; place-items: center; box-shadow: var(--shadow); }
+.empty .art svg { width: 36px; height: 36px; }
+.empty h2 { font-size: 22px; margin: 0 0 8px; letter-spacing: -.02em; }
+.empty p { color: var(--text-2); margin: 0 auto 20px; max-width: 34ch; }
+.stack { display: grid; gap: 10px; max-width: 320px; margin: 0 auto; }
+
+/* buttons */
+.btn {
+  border: 0; border-radius: 14px; padding: 13px 18px; font-weight: 600; font-size: 16px;
+  background: var(--surface-2); color: var(--text); display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.danger { background: transparent; color: var(--bad); }
+.btn:disabled { opacity: .4; }
+.btn.block { width: 100%; }
+.btn.sm { padding: 8px 12px; font-size: 14px; border-radius: 10px; }
+
+.fab {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 20px);
+  border: 0; border-radius: 999px; padding: 15px 22px; background: var(--accent); color: var(--accent-ink);
+  font-weight: 650; font-size: 16px; display: flex; align-items: center; gap: 8px; z-index: 5;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .22);
+}
+.fab svg { width: 20px; height: 20px; }
+
+/* sheets */
+dialog {
+  border: 0; padding: 0; margin: auto auto 0; width: 100%; max-width: 560px; max-height: 92vh;
+  background: var(--surface); color: var(--text); border-radius: 24px 24px 0 0;
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, .2);
+}
+dialog[open] { animation: up .28s cubic-bezier(.2, .8, .2, 1); }
+@keyframes up { from { transform: translateY(40px); opacity: 0; } }
+dialog::backdrop { background: rgba(0, 0, 0, .35); }
+@media (min-width: 600px) { dialog { margin: auto; border-radius: 24px; } }
+.sheet { padding: 8px 20px calc(env(safe-area-inset-bottom) + 20px); }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: var(--border); margin: 0 auto 12px; }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.sheet-head h3 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+.sheet p { color: var(--text-2); margin: 0 0 12px; font-size: 15px; }
+textarea, input, select {
+  width: 100%; border: 1px solid var(--border); background: var(--bg); border-radius: 14px; padding: 12px 14px;
+  font-size: 16px; outline: none;
+}
+textarea { min-height: 160px; resize: vertical; line-height: 1.45; }
+textarea:focus, input:focus, select:focus { border-color: var(--text-3); }
+label.f { display: block; font-size: 13px; color: var(--text-2); margin: 12px 0 6px; font-weight: 600; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--surface-2); border-radius: 12px; padding: 3px; }
+.seg button { border: 0; background: none; padding: 9px; border-radius: 10px; font-weight: 600; color: var(--text-2); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.check { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--text-2); margin-top: 12px; }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+.actions { display: flex; gap: 10px; margin-top: 18px; }
+.actions .btn { flex: 1; }
+.raw { font-size: 13px; color: var(--text-3); background: var(--bg); border-radius: 12px; padding: 10px 12px; margin-top: 14px; white-space: pre-wrap; word-break: break-word; }
+
+.preview { margin-top: 4px; max-height: 46vh; overflow: auto; }
+.pv { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--grid); }
+.pv input { width: 20px; height: 20px; accent-color: var(--accent); }
+.pv .t1 { font-size: 15px; font-weight: 550; }
+.pv .t2 { font-size: 13px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv.skip { opacity: .5; }
+.pv > div { min-width: 0; }
+
+.steps { margin: 0; padding-left: 20px; color: var(--text-2); font-size: 15px; }
+.steps li { margin-bottom: 8px; }
+.steps b { color: var(--text); }
+code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; word-break: break-all; margin: 8px 0; color: var(--text); }
+.section { border-top: 1px solid var(--grid); padding-top: 16px; margin-top: 16px; }
+.section h4 { margin: 0 0 6px; font-size: 16px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+#toast {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translate(-50%, -20px);
+  background: var(--text); color: var(--surface); padding: 12px 16px; border-radius: 14px; font-size: 15px;
+  opacity: 0; pointer-events: none; transition: all .25s ease; z-index: 50; max-width: calc(100vw - 32px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .25);
+}
+#toast.on { opacity: 1; transform: translate(-50%, 0); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="12" width="4" height="8" rx="2" fill="var(--income)"/><rect x="10" y="7" width="4" height="13" rx="2" fill="var(--expense)"/><rect x="17" y="4" width="4" height="16" rx="2" fill="var(--text)"/></svg>
+      Ledger
+    </div>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    </button>
+  </header>
+
+  <main id="dash">
+    <div class="month">
+      <h1 id="monthLabel"></h1>
+      <div class="nav">
+        <button class="icon-btn" id="prevMonth" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button class="icon-btn" id="nextMonth" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+      </div>
+    </div>
+    <div class="chips" id="currencyChips" role="group" aria-label="Currency"></div>
+
+    <section class="hero">
+      <div class="label">Left over this month</div>
+      <div class="big num" id="net"></div>
+      <div class="sub" id="netSub"></div>
+      <div class="tiles">
+        <div class="tile"><div class="k"><span class="swatch inc"></span>Income</div><div class="v num" id="inc"></div><div class="d" id="incD"></div></div>
+        <div class="tile"><div class="k"><span class="swatch exp"></span>Spent</div><div class="v num" id="exp"></div><div class="d" id="expD"></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Where it went <small id="catHint">Tap to filter</small></h2>
+      <div id="cats"></div>
+    </section>
+
+    <section class="card">
+      <h2>Last 6 months</h2>
+      <div class="legend"><span><i class="swatch inc"></i>Income</span><span><i class="swatch exp"></i>Spent</span></div>
+      <div class="trend" id="trend"><div class="tip" id="tip"></div></div>
+    </section>
+
+    <section class="card">
+      <h2>Transactions <small id="txCount"></small></h2>
+      <div id="list"></div>
+    </section>
+  </main>
+
+  <section class="empty" id="empty" hidden>
+    <div class="art"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="12" width="4" height="8" rx="2" fill="var(--income)"/><rect x="10" y="7" width="4" height="13" rx="2" fill="var(--expense)"/><rect x="17" y="4" width="4" height="16" rx="2" fill="var(--text)"/></svg></div>
+    <h2>Your money, from your bank's texts</h2>
+    <p>Ledger reads the SMS alerts your bank already sends and turns them into a clear picture of what came in and what went out. Everything stays on this phone.</p>
+    <div class="stack">
+      <button class="btn primary" data-open="add">Paste bank messages</button>
+      <button class="btn" data-open="settings">Set up automatic import</button>
+      <button class="btn" id="demoBtn">Try it with sample data</button>
+    </div>
+  </section>
+</div>
+
+<button class="fab" id="addBtn" aria-label="Add bank messages">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  Add messages
+</button>
+
+<!-- Add messages -->
+<dialog id="addSheet">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Add bank messages</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div id="addStep1">
+      <p>In Messages, long-press a bank SMS → <b>Copy</b>, then paste here. You can paste many at once. Leave a blank line between them.</p>
+      <textarea id="pasteBox" placeholder="Purchase of JOD 25.500 at CARREFOUR on 03/11/2026…"></textarea>
+      <div class="actions">
+        <button class="btn" id="pasteClip">Paste</button>
+        <button class="btn primary" id="parseBtn">Read messages</button>
+      </div>
+    </div>
+    <div id="addStep2" hidden>
+      <p id="pvSummary"></p>
+      <div class="preview" id="preview"></div>
+      <div class="actions">
+        <button class="btn" id="backBtn">Back</button>
+        <button class="btn primary" id="saveParsed">Add</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Edit transaction -->
+<dialog id="editSheet">
+  <form class="sheet" id="editForm" method="dialog">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Transaction</h3><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="seg" role="group" aria-label="Type">
+      <button type="button" data-type="expense">Spent</button>
+      <button type="button" data-type="income">Income</button>
+    </div>
+    <label class="f" for="eMerchant">Merchant / description</label>
+    <input id="eMerchant" autocomplete="off">
+    <div class="row2">
+      <div><label class="f" for="eAmount">Amount</label><input id="eAmount" type="number" inputmode="decimal" step="any" min="0"></div>
+      <div><label class="f" for="eCurrency">Currency</label><input id="eCurrency" maxlength="3" autocapitalize="characters"></div>
+    </div>
+    <div class="row2">
+      <div><label class="f" for="eCategory">Category</label><select id="eCategory"></select></div>
+      <div><label class="f" for="eDate">Date</label><input id="eDate" type="datetime-local"></div>
+    </div>
+    <label class="check" id="ruleWrap"><input type="checkbox" id="eRule"> <span id="ruleText">Always use this category for this merchant</span></label>
+    <div class="raw" id="eRaw"></div>
+    <div class="actions">
+      <button type="button" class="btn danger" id="deleteTx">Delete</button>
+      <button type="submit" class="btn primary" id="saveTx">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Settings -->
+<dialog id="settingsSheet">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Settings</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+
+    <label class="f" for="sCurrency" style="margin-top:0">Main currency</label>
+    <select id="sCurrency"></select>
+
+    <div class="section">
+      <h4>Automatic import on iPhone</h4>
+      <p>iPhone apps can't read your texts directly, but a Shortcuts automation can pass each new bank SMS to Ledger the moment it arrives.</p>
+      <ol class="steps">
+        <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>Message</b>.</li>
+        <li><b>Sender</b>: choose your bank's name (e.g. the sender ID). Optionally set <b>Message Contains</b> to a word your bank always uses. Choose <b>Run Immediately</b>.</li>
+        <li>Add the action <b>URL Encode</b> with input <b>Shortcut Input → Content</b>.</li>
+        <li>Add <b>Text</b> and type this link, then insert the <b>URL Encoded Text</b> variable at the end:
+          <code class="url" id="intakeUrl"></code>
+          <button class="btn sm" id="copyUrl">Copy link</button>
+        </li>
+        <li>Add <b>Open URLs</b> with the Text from step 4. Done.</li>
+      </ol>
+      <p class="muted">Tip: the automation opens Ledger in Safari, so use Ledger in Safari (bookmark it) for your data to stay in one place. Home-screen apps on iPhone keep separate storage.</p>
+    </div>
+
+    <div class="section">
+      <h4>Your data</h4>
+      <p id="dataInfo"></p>
+      <div class="btn-row">
+        <button class="btn sm" id="exportBtn">Export backup</button>
+        <button class="btn sm" id="importBtn">Import backup</button>
+        <button class="btn sm" id="sampleBtn">Load sample data</button>
+        <button class="btn sm danger" id="clearBtn">Erase everything</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+      <p class="muted" style="margin-top:12px">Ledger has no server. Your data lives only in this browser. Export a backup now and then.</p>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,573 @@
+/* Ledger — app logic. Data lives in localStorage on this device only. */
+(function () {
+  'use strict';
+  const P = window.LedgerParser;
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const KEY = 'ledger.v1';
+  const CURRENCIES = ['JOD', 'USD', 'SAR', 'AED', 'EGP', 'KWD', 'QAR', 'BHD', 'OMR', 'EUR', 'GBP', 'TRY', 'MAD', 'ILS', 'INR'];
+  const EXPENSE_CATS = [...P.CATEGORIES.expense.map((c) => c[0]), 'Other'];
+  const INCOME_CATS = [...P.CATEGORIES.income.map((c) => c[0]), 'Other income'];
+
+  // ---------- storage ----------
+  let memory = null;
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) { if (memory) return memory; }
+    return memory || { txns: [], settings: { currency: guessCurrency(), rules: {} } };
+  }
+  function save() {
+    memory = db;
+    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* private mode: keep in memory */ }
+  }
+  function guessCurrency() {
+    try {
+      const region = (new Intl.Locale(navigator.language).maximize().region || '').toUpperCase();
+      return { JO: 'JOD', SA: 'SAR', AE: 'AED', EG: 'EGP', KW: 'KWD', QA: 'QAR', BH: 'BHD', OM: 'OMR', GB: 'GBP', TR: 'TRY', MA: 'MAD', IN: 'INR', IL: 'ILS', PS: 'ILS' }[region] || 'USD';
+    } catch (e) { return 'USD'; }
+  }
+
+  let db = load();
+  db.settings.rules = db.settings.rules || {};
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+
+  const today = new Date();
+  const state = {
+    month: new Date(today.getFullYear(), today.getMonth(), 1),
+    currency: db.settings.currency,
+    category: null,
+    showAll: false,
+  };
+
+  // ---------- formatting ----------
+  const fmtCache = {};
+  function money(n, cur = state.currency, opts = {}) {
+    const k = cur + JSON.stringify(opts);
+    if (!fmtCache[k]) {
+      try { fmtCache[k] = new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, ...opts }); }
+      catch (e) { fmtCache[k] = { format: (x) => `${cur} ${x.toFixed(2)}` }; }
+    }
+    return fmtCache[k].format(n);
+  }
+  const moneyHead = (n, cur) => { const d = Math.abs(n) >= 1000 ? 0 : 2; return money(n, cur, { minimumFractionDigits: d, maximumFractionDigits: d }); };
+  const moneyShort = (n, cur) => money(n, cur, { maximumFractionDigits: n >= 100 ? 0 : 2, minimumFractionDigits: 0 });
+  const compact = (n) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+  const monthName = (d, style = 'long') => d.toLocaleDateString(undefined, { month: style });
+  const sameMonth = (iso, m) => { const d = new Date(iso); return d.getFullYear() === m.getFullYear() && d.getMonth() === m.getMonth(); };
+  const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const icon = (cat) => P.CATEGORY_ICONS[cat] || '•';
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const label = (t) => t.merchant || (t.type === 'income' ? 'Money in' : t.category === 'Other' ? 'Card payment' : t.category);
+
+  function dayLabel(d) {
+    const a = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const b = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const diff = Math.round((b - a) / 864e5);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  // ---------- transactions ----------
+  function applyRules(t) {
+    const r = t.merchant && db.settings.rules[t.merchant.toLowerCase()];
+    if (r && r.type === t.type) t.category = r.category;
+    return t;
+  }
+  // Ambiguous currency words ("dinar", "riyal") take the most common explicit currency seen so far.
+  function resolveCurrencies(list) {
+    const counts = {};
+    for (const t of [...db.txns, ...list]) if (!t.currencyGuessed) counts[t.currency] = (counts[t.currency] || 0) + 1;
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    if (!db.settings.currencyChosen && top) db.settings.currency = top[0];
+    const fallback = top ? top[0] : db.settings.currency;
+    for (const t of list) if (t.currencyGuessed) t.currency = db.settings.currencyChosen ? db.settings.currency : fallback;
+    return list;
+  }
+  function addTxns(list) {
+    resolveCurrencies(list);
+    const ids = new Set(db.txns.map((t) => t.id));
+    let added = 0;
+    for (const t of list) {
+      if (ids.has(t.id)) continue;
+      ids.add(t.id);
+      db.txns.push(applyRules({ ...t }));
+      added++;
+    }
+    db.txns.sort((a, b) => new Date(b.date) - new Date(a.date));
+    save();
+    return added;
+  }
+  const parseOpts = () => ({ defaultCurrency: db.settings.currency, receivedAt: new Date().toISOString() });
+
+  // ---------- render ----------
+  function render() {
+    const has = db.txns.length > 0;
+    $('#dash').hidden = !has;
+    $('#empty').hidden = has;
+    $('#addBtn').hidden = !has;
+    if (!has) return;
+
+    const currencies = [...new Set(db.txns.map((t) => t.currency))];
+    if (!currencies.includes(state.currency)) state.currency = currencies.includes(db.settings.currency) ? db.settings.currency : currencies[0];
+    $('#currencyChips').innerHTML = currencies.length > 1
+      ? currencies.map((c) => `<button class="chip" data-cur="${c}" aria-pressed="${c === state.currency}">${c}</button>`).join('')
+      : '';
+
+    const isThisYear = state.month.getFullYear() === today.getFullYear();
+    $('#monthLabel').innerHTML = `${monthName(state.month)}${isThisYear ? '' : ` <span>${state.month.getFullYear()}</span>`}`;
+    $('#nextMonth').disabled = state.month >= new Date(today.getFullYear(), today.getMonth(), 1);
+    $('#nextMonth').style.opacity = $('#nextMonth').disabled ? .3 : 1;
+
+    const inCur = db.txns.filter((t) => t.currency === state.currency);
+    const month = inCur.filter((t) => sameMonth(t.date, state.month));
+    const prev = inCur.filter((t) => sameMonth(t.date, addMonths(state.month, -1)));
+    const sum = (arr, type) => arr.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);
+    const inc = sum(month, 'income'), exp = sum(month, 'expense');
+    const pInc = sum(prev, 'income'), pExp = sum(prev, 'expense');
+
+    $('#net').textContent = moneyHead(inc - exp);
+    $('#netSub').textContent = inc > 0
+      ? (exp <= inc ? `You kept ${Math.round(((inc - exp) / inc) * 100)}% of what came in` : `You spent ${moneyShort(exp - inc)} more than came in`)
+      : month.length ? 'No income recorded this month yet' : 'Nothing recorded this month';
+    $('#inc').textContent = moneyHead(inc);
+    $('#exp').textContent = moneyHead(exp);
+    const delta = (now, then, word) => {
+      if (!then) return `${month.filter((t) => t.type === word).length} transactions`;
+      const p = Math.round(((now - then) / then) * 100);
+      return `${p === 0 ? 'Same as' : `${p > 0 ? '▲' : '▼'} ${Math.abs(p)}% vs`} ${monthName(addMonths(state.month, -1), 'short')}`;
+    };
+    $('#incD').textContent = delta(inc, pInc, 'income');
+    $('#expD').textContent = delta(exp, pExp, 'expense');
+
+    renderCategories(month, exp);
+    renderTrend(inCur);
+    renderList(month);
+  }
+
+  function renderCategories(month, total) {
+    const by = {};
+    for (const t of month) if (t.type === 'expense') by[t.category] = (by[t.category] || 0) + t.amount;
+    const rows = Object.entries(by).sort((a, b) => b[1] - a[1]);
+    $('#catHint').hidden = !rows.length;
+    if (!rows.length) { $('#cats').innerHTML = '<p class="muted">No spending this month.</p>'; return; }
+    const max = rows[0][1];
+    $('#cats').innerHTML = rows.map(([cat, v]) => {
+      const sel = state.category === cat;
+      const dim = state.category && !sel;
+      return `<button class="cat${dim ? ' dim' : ''}" data-cat="${esc(cat)}" aria-pressed="${sel}">
+        <span class="ic" aria-hidden="true">${icon(cat)}</span>
+        <span class="nm">${esc(cat)}</span>
+        <span class="am num">${moneyShort(v)} <span class="muted">${Math.round((v / total) * 100)}%</span></span>
+        <span class="track"><span class="bar" style="width:${Math.max(1, (v / max) * 100)}%"></span></span>
+      </button>`;
+    }).join('');
+  }
+
+  function renderTrend(inCur) {
+    const el = $('#trend');
+    const tip = $('#tip');
+    const months = Array.from({ length: 6 }, (_, i) => addMonths(state.month, i - 5));
+    const data = months.map((m) => {
+      const ts = inCur.filter((t) => sameMonth(t.date, m));
+      return {
+        m,
+        inc: ts.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
+        exp: ts.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
+      };
+    });
+    const W = el.clientWidth || 320, H = el.clientHeight || 200;
+    const padL = 36, padB = 22, padT = 8;
+    const iw = W - padL, ih = H - padB - padT;
+    const rawMax = Math.max(1, ...data.map((d) => Math.max(d.inc, d.exp)));
+    const step = niceStep(rawMax / 3);
+    const max = step * Math.ceil(rawMax / step);
+    const y = (v) => padT + ih - (v / max) * ih;
+    const col = iw / data.length;
+    const bw = Math.min(18, (col - 14) / 2);
+
+    const bar = (x, v, cls) => {
+      const h = (v / max) * ih;
+      if (h <= 0) return '';
+      const r = Math.min(4, h, bw / 2), top = padT + ih - h, base = padT + ih;
+      return `<path fill="var(--${cls})" d="M${x},${base} V${top + r} Q${x},${top} ${x + r},${top} H${x + bw - r} Q${x + bw},${top} ${x + bw},${top + r} V${base} Z"/>`;
+    };
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Income and spending, last six months">`;
+    for (let v = 0; v <= max + 1e-9; v += step) {
+      svg += `<line x1="${padL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>`;
+      svg += `<text class="axis" x="${padL - 8}" y="${y(v) + 4}" text-anchor="end">${compact(v)}</text>`;
+    }
+    data.forEach((d, i) => {
+      const cx = padL + col * i + col / 2;
+      const sel = i === data.length - 1;
+      svg += bar(cx - bw - 1, d.inc, 'income') + bar(cx + 1, d.exp, 'expense');
+      svg += `<text class="axis${sel ? ' sel' : ''}" x="${cx}" y="${H - 4}" text-anchor="middle">${monthName(d.m, 'short')}</text>`;
+      svg += `<rect data-i="${i}" x="${padL + col * i}" y="0" width="${col}" height="${H}" fill="transparent" style="cursor:pointer"/>`;
+    });
+    svg += '</svg>';
+    el.innerHTML = svg;
+    el.appendChild(tip);
+
+    const show = (i) => {
+      const d = data[i];
+      tip.innerHTML = `<b>${monthName(d.m)} ${d.m.getFullYear()}</b>
+        <div class="row"><span class="swatch inc"></span>Income&nbsp;<b class="num">${money(d.inc)}</b></div>
+        <div class="row"><span class="swatch exp"></span>Spent&nbsp;<b class="num">${money(d.exp)}</b></div>
+        <div class="row">Left over&nbsp;<b class="num">${money(d.inc - d.exp)}</b></div>`;
+      const cx = padL + col * i + col / 2;
+      const half = tip.offsetWidth / 2;
+      tip.style.left = Math.min(W - half, Math.max(half, cx)) + 'px';
+      tip.style.top = Math.max(0, y(Math.max(d.inc, d.exp)) - tip.offsetHeight - 8) + 'px';
+      tip.classList.add('on');
+    };
+    $$('rect[data-i]', el).forEach((r) => {
+      const i = +r.dataset.i;
+      r.addEventListener('pointerenter', () => show(i));
+      r.addEventListener('pointerdown', () => show(i));
+      r.addEventListener('click', () => { if (i !== data.length - 1) { state.month = data[i].m; state.category = null; render(); } });
+    });
+    el.onpointerleave = () => tip.classList.remove('on');
+  }
+
+  function niceStep(x) {
+    const p = Math.pow(10, Math.floor(Math.log10(x)));
+    const f = x / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  }
+
+  function renderList(month) {
+    let items = state.category ? month.filter((t) => t.category === state.category) : month;
+    $('#txCount').textContent = items.length ? `${items.length}` : '';
+    const limit = state.showAll ? Infinity : 25;
+    let html = state.category
+      ? `<div class="filter-note"><span>${icon(state.category)} ${esc(state.category)} only</span><button id="clearFilter">Show all</button></div>`
+      : '';
+    if (!items.length) html += '<p class="muted">No transactions this month.</p>';
+    let lastDay = '';
+    items.slice(0, limit).forEach((t) => {
+      const d = new Date(t.date);
+      const dl = dayLabel(d);
+      if (dl !== lastDay) { html += `<div class="day">${dl}</div>`; lastDay = dl; }
+      html += `<button class="tx" data-id="${t.id}">
+        <span class="ic" aria-hidden="true">${icon(t.category)}</span>
+        <div><div class="t1">${esc(label(t))}</div><div class="t2">${esc(t.category)} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</div></div>
+        <span class="amt num ${t.type === 'income' ? 'in' : 'out'}">${money(t.amount, t.currency)}</span>
+      </button>`;
+    });
+    if (items.length > limit) html += `<button class="more" id="showMore">Show ${items.length - limit} more</button>`;
+    $('#list').innerHTML = html;
+  }
+
+  // ---------- sheets ----------
+  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet') };
+  function open(name) {
+    if (name === 'add') { $('#addStep1').hidden = false; $('#addStep2').hidden = true; }
+    if (name === 'settings') fillSettings();
+    sheets[name].showModal();
+  }
+  Object.values(sheets).forEach((d) => {
+    d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); // tap backdrop
+  });
+  document.addEventListener('click', (e) => {
+    const o = e.target.closest('[data-open]');
+    if (o) open(o.dataset.open);
+    const c = e.target.closest('[data-close]');
+    if (c) c.closest('dialog').close();
+  });
+
+  // Add flow
+  let pending = [];
+  $('#addBtn').onclick = () => open('add');
+  $('#pasteClip').onclick = async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      const box = $('#pasteBox');
+      box.value = box.value ? box.value.trimEnd() + '\n\n' + t : t;
+    } catch (e) { toast('Long-press the box and choose Paste'); $('#pasteBox').focus(); }
+  };
+  $('#parseBtn').onclick = () => {
+    const results = P.parseBulk($('#pasteBox').value, parseOpts());
+    if (!results.length) { toast('Paste at least one message first'); return; }
+    const ids = new Set(db.txns.map((t) => t.id));
+    const seen = new Set();
+    resolveCurrencies(results.map((r) => r.txn).filter(Boolean));
+    pending = results.map((r) => {
+      const dup = r.txn && (ids.has(r.txn.id) || seen.has(r.txn.id));
+      if (r.txn) seen.add(r.txn.id);
+      return { ...r, txn: r.txn && applyRules(r.txn), dup, on: !!r.txn && !dup };
+    });
+    renderPreview();
+    $('#addStep1').hidden = true;
+    $('#addStep2').hidden = false;
+  };
+  function renderPreview() {
+    const ok = pending.filter((p) => p.txn && !p.dup).length;
+    const skipped = pending.length - ok;
+    $('#pvSummary').textContent = `Found ${ok} transaction${ok === 1 ? '' : 's'}` + (skipped ? ` · ${skipped} skipped (not a transaction, OTP or already added)` : '');
+    $('#preview').innerHTML = pending.map((p, i) => {
+      if (!p.txn || p.dup) {
+        return `<div class="pv skip"><span></span><div><div class="t1">${p.dup ? 'Already added' : 'Not a transaction'}</div><div class="t2">${esc(p.raw)}</div></div><span></span></div>`;
+      }
+      const t = p.txn;
+      return `<label class="pv"><input type="checkbox" data-i="${i}" ${p.on ? 'checked' : ''}>
+        <div><div class="t1">${icon(t.category)} ${esc(label(t))}</div><div class="t2">${esc(t.category)} · ${new Date(t.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
+        <span class="num" style="font-weight:600">${t.type === 'income' ? '+' : '−'}${money(t.amount, t.currency)}</span></label>`;
+    }).join('');
+    updateSaveBtn();
+  }
+  function updateSaveBtn() {
+    const n = pending.filter((p) => p.on).length;
+    $('#saveParsed').textContent = `Add ${n}`;
+    $('#saveParsed').disabled = !n;
+  }
+  $('#preview').addEventListener('change', (e) => {
+    const i = e.target.dataset.i;
+    if (i !== undefined) { pending[+i].on = e.target.checked; updateSaveBtn(); }
+  });
+  $('#backBtn').onclick = () => { $('#addStep1').hidden = false; $('#addStep2').hidden = true; };
+  $('#saveParsed').onclick = () => {
+    const list = pending.filter((p) => p.on).map((p) => p.txn);
+    const n = addTxns(list);
+    sheets.add.close();
+    $('#pasteBox').value = '';
+    if (list.length) jumpToMonthOf(list[0]);
+    render();
+    toast(`Added ${n} transaction${n === 1 ? '' : 's'}`);
+  };
+  function jumpToMonthOf(t) {
+    const d = new Date(t.date);
+    state.currency = t.currency;
+    state.month = new Date(d.getFullYear(), d.getMonth(), 1);
+    state.category = null;
+  }
+
+  // Edit flow
+  let editing = null, editType = 'expense';
+  function setEditType(type) {
+    editType = type;
+    $$('#editSheet [data-type]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.type === type));
+    const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
+    const cur = $('#eCategory').value;
+    $('#eCategory').innerHTML = cats.map((c) => `<option value="${esc(c)}">${icon(c)} ${esc(c)}</option>`).join('');
+    $('#eCategory').value = cats.includes(cur) ? cur : cats[cats.length - 1];
+  }
+  $$('#editSheet [data-type]').forEach((b) => (b.onclick = () => setEditType(b.dataset.type)));
+  function openEdit(id) {
+    editing = db.txns.find((t) => t.id === id);
+    if (!editing) return;
+    $('#eCategory').innerHTML = '';
+    setEditType(editing.type);
+    $('#eCategory').value = editing.category;
+    $('#eMerchant').value = editing.merchant || '';
+    $('#eAmount').value = editing.amount;
+    $('#eCurrency').value = editing.currency;
+    const d = new Date(editing.date);
+    $('#eDate').value = new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+    $('#eRule').checked = false;
+    $('#ruleWrap').hidden = !editing.merchant;
+    $('#eRaw').textContent = editing.raw || '';
+    $('#eRaw').hidden = !editing.raw;
+    open('edit');
+  }
+  $('#editForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!editing) return;
+    const amount = parseFloat($('#eAmount').value);
+    if (!(amount > 0)) { toast('Enter an amount above zero'); return; }
+    editing.type = editType;
+    editing.category = $('#eCategory').value;
+    editing.merchant = $('#eMerchant').value.trim();
+    editing.amount = amount;
+    editing.currency = ($('#eCurrency').value || state.currency).toUpperCase().slice(0, 3);
+    if ($('#eDate').value) editing.date = new Date($('#eDate').value).toISOString();
+    let changed = 0;
+    if ($('#eRule').checked && editing.merchant) {
+      const key = editing.merchant.toLowerCase();
+      db.settings.rules[key] = { category: editing.category, type: editing.type };
+      for (const t of db.txns) {
+        if (t !== editing && t.merchant && t.merchant.toLowerCase() === key && t.type === editing.type && t.category !== editing.category) {
+          t.category = editing.category; changed++;
+        }
+      }
+    }
+    db.txns.sort((a, b) => new Date(b.date) - new Date(a.date));
+    save();
+    sheets.edit.close();
+    render();
+    toast(changed ? `Saved · updated ${changed} more from ${editing.merchant}` : 'Saved');
+  });
+  $('#deleteTx').onclick = () => {
+    if (!editing || !confirm('Delete this transaction?')) return;
+    db.txns = db.txns.filter((t) => t !== editing);
+    save();
+    sheets.edit.close();
+    render();
+    toast('Deleted');
+  };
+
+  // Settings
+  const intakeUrl = () => location.origin + location.pathname + '#sms=';
+  function fillSettings() {
+    $('#sCurrency').innerHTML = CURRENCIES.map((c) => `<option value="${c}">${c}</option>`).join('');
+    $('#sCurrency').value = db.settings.currency;
+    $('#intakeUrl').textContent = intakeUrl();
+    const n = db.txns.length;
+    const sample = db.txns.filter((t) => t.sample).length;
+    $('#dataInfo').textContent = `${n} transaction${n === 1 ? '' : 's'} stored on this device` + (sample ? ` (${sample} sample)` : '') + '.';
+    $('#sampleBtn').textContent = sample ? 'Remove sample data' : 'Load sample data';
+  }
+  $('#sCurrency').onchange = (e) => { db.settings.currency = e.target.value; db.settings.currencyChosen = true; state.currency = e.target.value; save(); render(); };
+  $('#copyUrl').onclick = async () => {
+    try { await navigator.clipboard.writeText(intakeUrl()); toast('Link copied'); } catch (e) { toast('Select the link and copy it'); }
+  };
+  $('#exportBtn').onclick = () => {
+    const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `ledger-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  $('#importBtn').onclick = () => $('#importFile').click();
+  $('#importFile').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!Array.isArray(data.txns)) throw new Error('bad file');
+      const n = addTxns(data.txns.filter((t) => t && t.id && t.amount > 0 && t.date));
+      Object.assign(db.settings.rules, (data.settings && data.settings.rules) || {});
+      save(); render(); fillSettings();
+      toast(`Imported ${n} new transaction${n === 1 ? '' : 's'}`);
+    } catch (err) { toast("That file isn't a Ledger backup"); }
+    e.target.value = '';
+  };
+  $('#clearBtn').onclick = () => {
+    if (!confirm('Erase all transactions from this device? Export a backup first if you might need them.')) return;
+    db.txns = [];
+    db.settings.rules = {};
+    save(); render(); fillSettings();
+    toast('All data erased');
+  };
+  $('#sampleBtn').onclick = () => {
+    if (db.txns.some((t) => t.sample)) {
+      db.txns = db.txns.filter((t) => !t.sample); save();
+      toast('Sample data removed');
+    } else loadSample();
+    render(); fillSettings();
+  };
+  $('#demoBtn').onclick = loadSample;
+
+  function loadSample() {
+    const cur = db.settings.currency;
+    const now = new Date();
+    const fmt = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const rnd = (a, b) => Math.round((a + Math.random() * (b - a)) * 100) / 100;
+    const templates = [
+      ['Purchase of {c} {a} at CARREFOUR CITY MALL on {d}. Available balance {c} 1,240.00', 35, 95, 5],
+      ['Purchase of {c} {a} at STARBUCKS on {d}', 3, 9, 7],
+      ['Purchase of {c} {a} at TALABAT on {d}', 8, 24, 5],
+      ['Your card was debited {c} {a} at TOTAL FUEL STATION on {d}', 20, 40, 3],
+      ['Purchase of {c} {a} at UBER TRIP on {d}', 2, 9, 4],
+      ['Purchase of {c} {a} at AMAZON on {d}', 15, 80, 2],
+      ['Bill payment of {c} {a} to ORANGE TELECOM on {d}', 18, 30, 1],
+      ['Bill payment of {c} {a} to ELECTRICITY CO on {d}', 25, 60, 1],
+      ['Purchase of {c} {a} at NETFLIX.COM on {d}', 9.99, 9.99, 1],
+      ['ATM cash withdrawal of {c} {a} on {d}', 40, 100, 1],
+      ['Purchase of {c} {a} at CITY PHARMACY on {d}', 5, 30, 1],
+    ];
+    const msgs = [];
+    for (let back = 3; back >= 0; back--) {
+      const m = new Date(now.getFullYear(), now.getMonth() - back, 1);
+      const lastDay = back === 0 ? now.getDate() : new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+      const at = (day) => { const d = new Date(m.getFullYear(), m.getMonth(), Math.min(day, lastDay), 8 + Math.floor(Math.random() * 13), Math.floor(Math.random() * 60)); return d; };
+      msgs.push(`Your account has been credited with ${cur} ${(1450).toFixed(2)} SALARY from ACME TRADING on ${fmt(at(1))}`);
+      if (Math.random() > .4) msgs.push(`Transfer received ${cur} ${rnd(50, 200).toFixed(2)} from SARA K. on ${fmt(at(1 + Math.floor(Math.random() * 27)))}`);
+      for (const [tpl, lo, hi, n] of templates) {
+        const count = Math.max(0, Math.round(back === 0 ? (n * lastDay) / 30 : n));
+        for (let k = 0; k < count; k++) {
+          const d = at(1 + Math.floor(Math.random() * lastDay));
+          msgs.push(tpl.replace(/\{c\}/g, cur).replace('{a}', rnd(lo, hi).toFixed(2)).replace('{d}', fmt(d)));
+        }
+      }
+    }
+    const list = msgs.map((s) => P.parseMessage(s, parseOpts())).filter(Boolean).map((t) => ({ ...t, sample: true }));
+    const n = addTxns(list);
+    state.currency = cur;
+    state.month = new Date(now.getFullYear(), now.getMonth(), 1);
+    render();
+    toast(`Loaded ${n} sample transactions`);
+  }
+
+  // ---------- events on the dashboard ----------
+  $('#prevMonth').onclick = () => { state.month = addMonths(state.month, -1); state.category = null; state.showAll = false; render(); };
+  $('#nextMonth').onclick = () => { state.month = addMonths(state.month, 1); state.category = null; state.showAll = false; render(); };
+  $('#settingsBtn').onclick = () => open('settings');
+  document.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-cur]');
+    if (chip) { state.currency = chip.dataset.cur; state.category = null; render(); return; }
+    const cat = e.target.closest('.cat');
+    if (cat) { state.category = state.category === cat.dataset.cat ? null : cat.dataset.cat; render(); return; }
+    const tx = e.target.closest('.tx');
+    if (tx) { openEdit(tx.dataset.id); return; }
+    if (e.target.id === 'clearFilter') { state.category = null; render(); return; }
+    if (e.target.id === 'showMore') { state.showAll = true; render(); }
+  });
+
+  // Swipe left/right on the dashboard to change month.
+  let sx = null, sy = null;
+  $('#dash').addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  $('#dash').addEventListener('touchend', (e) => {
+    if (sx === null) return;
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    sx = null;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) (dx > 0 ? $('#prevMonth') : $('#nextMonth')).click();
+  });
+
+  let rt;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 120); });
+
+  // ---------- toast ----------
+  let tt;
+  function toast(msg) {
+    const el = $('#toast');
+    el.textContent = msg;
+    el.classList.add('on');
+    clearTimeout(tt);
+    tt = setTimeout(() => el.classList.remove('on'), 2600);
+  }
+
+  // ---------- incoming SMS from the iOS Shortcut: …/#sms=<url-encoded text> ----------
+  function intake() {
+    let text = null;
+    const h = location.hash;
+    if (h.startsWith('#sms=')) text = h.slice(5);
+    const q = new URLSearchParams(location.search).get('sms');
+    if (!text && q) text = q;
+    if (!text) return;
+    try { text = decodeURIComponent(text.replace(/\+/g, ' ')); } catch (e) {}
+    history.replaceState(null, '', location.pathname);
+    const t = P.parseMessage(text, parseOpts());
+    if (!t) {
+      $('#pasteBox').value = text;
+      open('add');
+      toast("Couldn't read that one. Check it below");
+      return;
+    }
+    const n = addTxns([t]);
+    jumpToMonthOf(t);
+    render();
+    toast(n ? `${t.type === 'income' ? 'Received' : 'Spent'} ${money(t.amount, t.currency)}${t.merchant ? ' · ' + t.merchant : ''}` : 'Already recorded');
+  }
+  window.addEventListener('hashchange', intake);
+
+  render();
+  intake();
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+})();

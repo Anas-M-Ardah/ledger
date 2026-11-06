@@ -1,0 +1,75 @@
+// Run: node --test
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { parseMessage, splitMessages } = require('./parser.js');
+
+const opts = { defaultCurrency: 'JOD', receivedAt: '2026-11-06T10:00:00.000Z' };
+const p = (s) => parseMessage(s, opts);
+
+const cases = [
+  ['Your card ending 1234 was used for a purchase of JOD 25.500 at CARREFOUR CITY MALL on 03/11/2026 14:22. Available balance JOD 1,240.000',
+    { amount: 25.5, currency: 'JOD', type: 'expense', category: 'Groceries', day: '2026-11-03' }],
+  ['Dear customer, your account has been credited with JOD 950.00 SALARY from ACME LLC on 01-11-2026. Balance: JOD 2,190.00',
+    { amount: 950, currency: 'JOD', type: 'income', category: 'Salary', day: '2026-11-01' }],
+  ['Your a/c XX4521 debited by USD 12.99 for NETFLIX.COM on 2026-10-28. Avl Bal USD 410.20',
+    { amount: 12.99, currency: 'USD', type: 'expense', category: 'Entertainment', day: '2026-10-28' }],
+  ['تم خصم مبلغ 18.750 دينار من بطاقتك لدى مطعم الريم بتاريخ 02/11/2026 الرصيد المتاح 820.000 دينار',
+    { amount: 18.75, currency: 'JOD', type: 'expense', category: 'Dining', day: '2026-11-02' }],
+  ['تم إيداع ٥٠٠٫٠٠ د.أ في حسابك رقم ***8812 حوالة واردة من أحمد. الرصيد ١٣٢٠٫٠٠ د.أ',
+    { amount: 500, currency: 'JOD', type: 'income', category: 'Transfers' }],
+  ['ATM cash withdrawal of AED 200.00 from your account on 05 Nov 2026. Available balance AED 3,500.00',
+    { amount: 200, currency: 'AED', type: 'expense', category: 'Cash', day: '2026-11-05' }],
+  ['Purchase SAR 45.00 at UBER *TRIP card **9988 05/11/26 09:12',
+    { amount: 45, currency: 'SAR', type: 'expense', category: 'Transport', merchant: 'UBER *TRIP' }],
+  ['Refund of $30.00 from AMAZON has been credited to your card.',
+    { amount: 30, currency: 'USD', type: 'income', category: 'Refund' }],
+  ['CliQ transfer of JOD 40.000 sent to MOHAMMAD ALI. Ref 99812',
+    { amount: 40, currency: 'JOD', type: 'expense', category: 'Transfers', merchant: 'MOHAMMAD ALI' }],
+  ['Your ZAIN bill payment of 15.000 JOD was successful.',
+    { amount: 15, currency: 'JOD', type: 'expense', category: 'Bills' }],
+];
+
+for (const [msg, exp] of cases) {
+  test(msg.slice(0, 60), () => {
+    const t = p(msg);
+    assert.ok(t, 'should parse');
+    assert.equal(t.amount, exp.amount);
+    assert.equal(t.currency, exp.currency);
+    assert.equal(t.type, exp.type);
+    assert.equal(t.category, exp.category);
+    if (exp.merchant) assert.equal(t.merchant, exp.merchant);
+    if (exp.day) {
+      const d = new Date(t.date);
+      const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      assert.equal(local, exp.day);
+    }
+  });
+}
+
+test('merchant extracted from "at"', () => {
+  assert.equal(p(cases[0][0]).merchant, 'CARREFOUR CITY MALL');
+});
+
+test('ignores OTP and declined messages', () => {
+  assert.equal(p('Your OTP for purchase of JOD 25.000 at AMAZON is 482910. Do not share it.'), null);
+  assert.equal(p('Transaction of USD 50.00 at STEAM was declined due to insufficient funds.'), null);
+  assert.equal(p('رمز التحقق الخاص بك هو 4821 لعملية شراء بمبلغ 20 دينار'), null);
+});
+
+test('ignores non-transaction messages', () => {
+  assert.equal(p('Enjoy 20% off at participating restaurants this weekend!'), null);
+});
+
+test('balance-only amount is not a transaction', () => {
+  assert.equal(p('Your available balance is JOD 1,240.000 as of today.'), null);
+});
+
+test('same message gives same id (dedupe)', () => {
+  assert.equal(p(cases[0][0]).id, p(cases[0][0] + '  ').id);
+});
+
+test('splitMessages: blank lines and one-per-line', () => {
+  assert.equal(splitMessages('a JOD 1 debited\n\nb JOD 2 debited\n\n\nc').length, 3);
+  assert.equal(splitMessages('Purchase JOD 1 at X\nPurchase JOD 2 at Y').length, 2);
+  assert.equal(splitMessages('Purchase JOD 1 at X\ncontinued text').length, 1);
+});
