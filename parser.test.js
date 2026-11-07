@@ -136,3 +136,11 @@ test('ignores bill reminders (not payments)', () => {
   assert.equal(p('تذكير: فاتورتك بقيمة 20 دينار مستحقة الدفع'), null);
   assert.ok(p('Your ZAIN bill payment of 15.000 JOD was successful.')); // an actual payment still counts
 });
+
+test('splitMessages: "---" on the same line as the message', () => {
+  const inbox = '\n--- ' + ARAB_BANK + '\n--- JO\nYou have a purchase transaction on account 0196*500 from ZAIN amount JOD 5.000 on 08/11/2026 16:00 . Balance JOD 1011.126\n';
+  const parts = splitMessages(inbox);
+  assert.equal(parts.length, 2);
+  assert.equal(parseMessage(parts[0], { defaultCurrency: 'JOD' }).amount, 10);
+  assert.equal(parseMessage(parts[1], { defaultCurrency: 'JOD' }).merchant, 'ZAIN');
+});

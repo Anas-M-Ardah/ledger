@@ -272,7 +272,7 @@
     const text = String(bulk || '').replace(/\r\n?/g, '\n').trim();
     if (!text) return [];
     // Messages are separated by blank lines or by a line of dashes (the Shortcut inbox file uses "---").
-    let parts = text.split(/\n\s*\n+|^\s*-{3,}\s*$/m).map((s) => (s || '').trim()).filter(Boolean);
+    let parts = text.split(/\n\s*\n+|^[ \t]*-{3,}[ \t]*/m).map((s) => (s || '').trim()).filter(Boolean);
     if (parts.length === 1) {
       const lines = text.split('\n').map((s) => s.trim()).filter(Boolean);
       const withAmounts = lines.filter((l) => findAmounts(normalize(l), 'USD').length);
