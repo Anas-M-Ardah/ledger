@@ -122,3 +122,10 @@ test('food words in merchant names', () => {
   assert.equal(cat('RESTAURANT ALDAR'), 'Dining');
   assert.equal(cat('PRESTIGE AUTO'), 'Other'); // "res" inside a word is not food
 });
+
+test('splitMessages: inbox file with --- separators and multi-line messages', () => {
+  const inbox = '---\n' + ARAB_BANK + '\n---\nJO\nYou have a purchase transaction on account 0196*500 from ZAIN amount JOD 5.000 on 08/11/2026 16:00 . Balance JOD 1011.126\n---\n';
+  const parts = splitMessages(inbox);
+  assert.equal(parts.length, 2);
+  assert.equal(parseMessage(parts[1], { defaultCurrency: 'JOD' }).amount, 5);
+});

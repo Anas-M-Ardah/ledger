@@ -188,6 +188,12 @@ button { cursor: pointer; }
 .place > span:first-child, .place > span:nth-child(3) { min-width: 0; }
 #placesList { max-height: 58vh; overflow: auto; margin-top: 10px; }
 
+.top-actions { display: flex; gap: 2px; }
+details.alt { margin-top: 12px; }
+details.alt summary { font-weight: 600; color: var(--text); font-size: 15px; cursor: pointer; padding: 6px 0; }
+details.alt p { margin-top: 8px; }
+.steps code { font: 13px ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 5px; }
+
 /* category bars */
 .cat {
   display: grid; grid-template-columns: 32px 1fr auto; gap: 4px 12px; align-items: center;
@@ -330,9 +336,14 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="12" width="4" height="8" rx="2" fill="var(--income)"/><rect x="10" y="7" width="4" height="13" rx="2" fill="var(--expense)"/><rect x="17" y="4" width="4" height="16" rx="2" fill="var(--text)"/></svg>
       Ledger
     </div>
+    <div class="top-actions">
+    <button class="icon-btn" id="syncBtn" aria-label="Sync messages from Shortcut">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+    </button>
     <button class="icon-btn" id="settingsBtn" aria-label="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
     </button>
+    </div>
   </header>
 
   <main id="dash">
@@ -444,6 +455,18 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
   </form>
 </dialog>
 
+<!-- Sync from the Shortcut inbox -->
+<dialog id="syncSheet">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Sync from Shortcut</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <p>No bank messages on the clipboard. You may have copied something else since. Pick the inbox file instead: <b>iCloud Drive › Shortcuts › Ledger inbox.txt</b>.</p>
+    <div class="actions"><button class="btn primary" id="pickInbox">Choose inbox file</button></div>
+    <input type="file" id="inboxFile" accept=".txt,text/plain" hidden>
+    <p class="muted" style="margin-top:14px">Not set up yet? Settings → Automatic import on iPhone.</p>
+  </div>
+</dialog>
+
 <!-- Category picker -->
 <dialog id="pickSheet">
   <div class="sheet">
@@ -501,20 +524,21 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
 
     <div class="section">
       <h4>Automatic import on iPhone</h4>
-      <p>iPhone apps can't read your texts directly, but a Shortcuts automation can pass each new bank SMS to Ledger the moment it arrives.</p>
+      <p>iPhone apps can't read your texts, but a Shortcuts automation can collect every bank SMS as it arrives. Then tap <b>↻ Sync</b> (top right) when you open Ledger.</p>
       <ol class="steps">
         <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>Message</b>.</li>
-        <li>Leave <b>Sender</b> empty (banks like Arab Bank text from a name, not a contact). Set <b>Message Contains</b> to a word every bank alert has, such as <b>JOD</b> (or <b>دينار</b> for Arabic alerts; add a second automation for each). Choose <b>Run Immediately</b> and turn off <b>Notify When Run</b>.</li>
-        <li>Add the action <b>URL Encode</b> with input <b>Shortcut Input → Content</b>.</li>
-        <li>Add <b>Text</b> and type this link, then insert the <b>URL Encoded Text</b> variable at the end:
-          <code class="url" id="intakeUrl"></code>
-          <button class="btn sm" id="copyUrl">Copy link</button>
-        </li>
-        <li>Add <b>Open URLs</b> with the Text from step 4. Done.</li>
+        <li>Leave <b>Sender</b> empty (banks like Arab Bank text from a name, not a contact). Set <b>Message Contains</b> to <b>JOD</b> (or <b>دينار</b> for Arabic alerts; one automation per word). Choose <b>Run Immediately</b> and turn off <b>Notify When Run</b>.</li>
+        <li>Add <b>Append to Text File</b>. In its text box type <code>---</code>, start a new line, and insert <b>Shortcut Input</b>. Set the file to <code>Ledger inbox.txt</code> and turn on <b>Make New Line</b>.</li>
+        <li>Add <b>Get File from Folder</b>: folder <b>Shortcuts</b>, path <code>Ledger inbox.txt</code>.</li>
+        <li>Add <b>Copy to Clipboard</b>. It copies the file from step 4. Done.</li>
       </ol>
-      <p class="muted">Other texts that happen to contain your word are ignored: Ledger only keeps messages it can read as a transaction.</p>
-      <p class="muted">Tip: the automation opens Ledger in Safari, so use Ledger in Safari (bookmark it) for your data to stay in one place. Home-screen apps on iPhone keep separate storage.</p>
-      <p class="raw" id="standaloneWarn" hidden>⚠️ You opened Ledger from a Home Screen icon. This copy has its <b>own data</b>: messages from the automation go to Safari, not here. Export a backup here, import it in Safari, and re-add the icon with <b>Open as Web App</b> turned off.</p>
+      <p class="muted">When you open Ledger, tap <b>↻ Sync</b> and allow Paste. If you've copied something else since, Ledger lets you pick <b>Ledger inbox.txt</b> from iCloud Drive › Shortcuts instead. Messages already in Ledger are skipped, and texts that aren't transactions are ignored.</p>
+      <details class="alt">
+        <summary>Only use Ledger in Safari? Fully automatic option</summary>
+        <p>Instead of steps 3–5: add <b>URL Encode</b> (input: <b>Shortcut Input</b>), then <b>Text</b> with this link followed by the <b>URL Encoded Text</b> variable, then <b>Open URLs</b>. Each SMS opens Ledger in Safari and is added straight away. Messages sent this way go to Safari's copy of Ledger, not to a Home Screen icon.</p>
+        <code class="url" id="intakeUrl"></code>
+        <button class="btn sm" id="copyUrl">Copy link</button>
+      </details>
     </div>
 
     <div class="section">

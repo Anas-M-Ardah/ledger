@@ -192,6 +192,35 @@
     if (n) toast('Balance saved');
   });
 
+  // ---------- sync from the Shortcut inbox ----------
+  // The Shortcut appends each bank SMS to "Ledger inbox.txt" and copies the whole file to the clipboard.
+  // Re-importing the whole inbox is safe: messages already in Ledger are skipped.
+  function importInbox(text) {
+    const txns = P.parseBulk(text, parseOpts()).map((r) => r.txn).filter(Boolean);
+    if (!txns.length) return null;
+    const n = addTxns(txns);
+    if (n) jumpToMonthOf([...txns].sort((a, b) => new Date(b.date) - new Date(a.date))[0]);
+    render();
+    return n;
+  }
+  const syncedMsg = (n) => (n ? `Synced ${n} new transaction${n === 1 ? '' : 's'}` : 'Up to date. No new messages');
+  $('#syncBtn').onclick = async () => {
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch (e) { /* denied or unsupported */ }
+    const n = text ? importInbox(text) : null;
+    if (n === null) { open('sync'); return; }
+    toast(syncedMsg(n));
+  };
+  $('#pickInbox').onclick = () => $('#inboxFile').click();
+  $('#inboxFile').onchange = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const n = importInbox(await f.text());
+    sheets.sync.close();
+    toast(n === null ? 'No bank messages found in that file' : syncedMsg(n));
+  };
+
   // ---------- recategorising ----------
   // Put every payment from a place into a category, now and in future.
   function applyToPlace(key, type, category) {
@@ -506,7 +535,7 @@
   }
 
   // ---------- sheets ----------
-  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet'), sort: $('#sortSheet'), pick: $('#pickSheet'), places: $('#placesSheet') };
+  const sheets = { add: $('#addSheet'), edit: $('#editSheet'), settings: $('#settingsSheet'), balance: $('#balanceSheet'), sort: $('#sortSheet'), pick: $('#pickSheet'), places: $('#placesSheet'), sync: $('#syncSheet') };
   function open(name) {
     if (name === 'add') { $('#addStep1').hidden = false; $('#addStep2').hidden = true; }
     if (name === 'settings') fillSettings();
@@ -659,9 +688,7 @@
 
   // Settings
   const intakeUrl = () => location.origin + location.pathname + '#sms=';
-  const isHomeScreenApp = () => window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
   function fillSettings() {
-    $('#standaloneWarn').hidden = !isHomeScreenApp();
     $('#sCurrency').innerHTML = CURRENCIES.map((c) => `<option value="${c}">${c}</option>`).join('');
     $('#sCurrency').value = db.settings.currency;
     $('#intakeUrl').textContent = intakeUrl();
