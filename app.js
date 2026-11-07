@@ -659,7 +659,9 @@
 
   // Settings
   const intakeUrl = () => location.origin + location.pathname + '#sms=';
+  const isHomeScreenApp = () => window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
   function fillSettings() {
+    $('#standaloneWarn').hidden = !isHomeScreenApp();
     $('#sCurrency').innerHTML = CURRENCIES.map((c) => `<option value="${c}">${c}</option>`).join('');
     $('#sCurrency').value = db.settings.currency;
     $('#intakeUrl').textContent = intakeUrl();
