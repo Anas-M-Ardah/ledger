@@ -689,6 +689,7 @@
   // Settings
   const intakeUrl = () => location.origin + location.pathname + '#sms=';
   function fillSettings() {
+    $('#historyUrl').textContent = (location.host + location.pathname).replace(/index\.html$/, '') + 'history.html';
     $('#sCurrency').innerHTML = CURRENCIES.map((c) => `<option value="${c}">${c}</option>`).join('');
     $('#sCurrency').value = db.settings.currency;
     $('#intakeUrl').textContent = intakeUrl();

@@ -52,6 +52,7 @@
   const IGNORE = [
     /\botp\b/i, /one[- ]time/i, /verification code/i, /\bpasscode\b/i, /\bpassword\b/i,
     /do not share/i, /\bdeclined\b/i, /\brejected\b/i, /\bunsuccessful\b/i, /\bfailed\b/i,
+    /\bis due\b/i, /\bdue date\b/i, /\bdue on\b/i, /\breminder\b/i, /مستحق/, /تذكير/,
     /رمز التحقق/, /كلمة المرور/, /كلمة السر/, /لا تشارك/, /رمز التفعيل/, /مرفوض/, /رفض/, /لم تتم/, /فشل/,
   ];
   const INCOME = [

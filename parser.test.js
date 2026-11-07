@@ -129,3 +129,10 @@ test('splitMessages: inbox file with --- separators and multi-line messages', ()
   assert.equal(parts.length, 2);
   assert.equal(parseMessage(parts[1], { defaultCurrency: 'JOD' }).amount, 5);
 });
+
+test('ignores bill reminders (not payments)', () => {
+  assert.equal(p('Your Orange bill of JOD 18.500 is due on 10/11/2026'), null);
+  assert.equal(p('Reminder: your credit card payment of JOD 120.000 is due on 15/11/2026'), null);
+  assert.equal(p('تذكير: فاتورتك بقيمة 20 دينار مستحقة الدفع'), null);
+  assert.ok(p('Your ZAIN bill payment of 15.000 JOD was successful.')); // an actual payment still counts
+});

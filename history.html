@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger History Import</title>
+<meta name="description" content="Pull your past bank SMS out of an iPhone backup on your PC, for Ledger. Runs entirely in your browser.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f5f2; --surface: #fcfcfb; --surface-2: #f0efec; --border: #e4e2dc;
+  --text: #0b0b0b; --text-2: #52514e; --text-3: #7c7b76; --accent: #0b0b0b; --accent-ink: #fcfcfb;
+  --good: #006300; --bad: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121211; --surface: #1a1a19; --surface-2: #242422; --border: #2e2e2b;
+    --text: #f0efec; --text-2: #c3c2b7; --text-3: #8e8d86; --accent: #f0efec; --accent-ink: #121211;
+    --good: #5cc45c; --bad: #f2867f;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211; --surface: #1a1a19; --surface-2: #242422; --border: #2e2e2b;
+  --text: #f0efec; --text-2: #c3c2b7; --text-3: #8e8d86; --accent: #f0efec; --accent-ink: #121211;
+  --good: #5cc45c; --bad: #f2867f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 30px; letter-spacing: -.02em; margin: 0 0 6px; }
+.lead { color: var(--text-2); margin: 0 0 24px; }
+.step { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px 20px; margin-top: 14px; }
+.step h2 { font-size: 18px; margin: 0 0 8px; display: flex; gap: 10px; align-items: center; }
+.n { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: inline-grid; place-items: center; font-size: 14px; flex: none; }
+.step p, .step li { color: var(--text-2); }
+.step b { color: var(--text); }
+code { font: 14px ui-monospace, Consolas, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; word-break: break-all; }
+.path { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.btn { border: 0; border-radius: 12px; padding: 11px 16px; font: inherit; font-weight: 600; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.sm { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+.btn:disabled { opacity: .4; cursor: default; }
+select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.status { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); color: var(--text); }
+.status.err { color: var(--bad); }
+.senders { margin-top: 12px; display: grid; gap: 6px; }
+.sender { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.sender input { width: 18px; height: 18px; accent-color: var(--accent); }
+.sender .s1 { font-weight: 600; }
+.sender .s2 { color: var(--text-3); font-size: 14px; }
+.sender > span { min-width: 0; }
+.preview { margin-top: 12px; font-size: 14px; color: var(--text-2); }
+.preview div { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
+.preview div span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted { color: var(--text-3); font-size: 14px; }
+.lock { display: flex; gap: 10px; align-items: flex-start; color: var(--text-2); font-size: 14px; margin-top: 20px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bring in your SMS history</h1>
+  <p class="lead">Do this once on a Windows PC to load years of Arab Bank messages into Ledger. Everything happens in this browser: your messages are not uploaded anywhere.</p>
+
+  <section class="step">
+    <h2><span class="n">1</span>Back up your iPhone to this PC</h2>
+    <ol>
+      <li>Connect your iPhone with a cable and open the free <b>Apple Devices</b> app (or <b>iTunes</b>). Both are in the Microsoft Store.</li>
+      <li>Choose <b>Back up all of the data on your iPhone to this computer</b>. Leave <b>Encrypt local backup</b> <b>unticked</b>. Encrypted backups can't be read here.</li>
+      <li>Click <b>Back Up Now</b> and wait until it finishes.</li>
+    </ol>
+  </section>
+
+  <section class="step">
+    <h2><span class="n">2</span>Find the messages file</h2>
+    <p>Copy one of these into the File Explorer address bar and press Enter:</p>
+    <div class="path"><code>%USERPROFILE%\Apple\MobileSync\Backup</code><button class="btn sm" data-copy="%USERPROFILE%\Apple\MobileSync\Backup">Copy</button></div>
+    <p class="muted" style="margin:0">Apple Devices app or Microsoft Store iTunes</p>
+    <div class="path"><code>%APPDATA%\Apple Computer\MobileSync\Backup</code><button class="btn sm" data-copy="%APPDATA%\Apple Computer\MobileSync\Backup">Copy</button></div>
+    <p class="muted" style="margin:0">iTunes downloaded from apple.com</p>
+    <p>Open the newest folder inside, then the folder <code>3d</code>. The messages file is the one named:</p>
+    <div class="path"><code>3d0d7e5fb2ce288813306e4d4636395e047a3d28</code><button class="btn sm" data-copy="3d0d7e5fb2ce288813306e4d4636395e047a3d28">Copy</button></div>
+    <p class="muted">Can't see it? Paste that name into the search box at the top-right of File Explorer while in the Backup folder.</p>
+  </section>
+
+  <section class="step">
+    <h2><span class="n">3</span>Choose it here</h2>
+    <div class="path">
+      <button class="btn primary" id="pickBtn">Choose messages file</button>
+      <label class="muted">Currency for "dinar"/"riyal" without a code:
+        <select id="currency"></select></label>
+    </div>
+    <input type="file" id="file" hidden>
+    <div class="status" id="status" hidden></div>
+    <div class="senders" id="senders"></div>
+    <div class="preview" id="preview"></div>
+  </section>
+
+  <section class="step" id="saveStep" hidden>
+    <h2><span class="n">4</span>Save and send to your phone</h2>
+    <p id="saveSummary"></p>
+    <button class="btn primary" id="saveBtn">Save ledger-history.json</button>
+    <ol>
+      <li>Send the file to your iPhone: email it to yourself, save it to iCloud Drive, or send it to yourself on WhatsApp. Then on the phone, save it to <b>Files</b>.</li>
+      <li>In Ledger on your phone: <b>Settings → Import backup</b> and pick <b>ledger-history.json</b>.</li>
+      <li>Done. Transactions already in Ledger are skipped, so importing twice is harmless. Delete the file afterwards.</li>
+    </ol>
+  </section>
+
+  <p class="lock">🔒 <span>This page reads the backup file with code that runs only in your browser (Ledger's parser and the open-source sql.js library, both served from this site). Nothing you choose here leaves this PC.</span></p>
+</main>
+
+<script src="parser.js"></script>
+<script src="vendor/sql.js/sql-wasm.js"></script>
+<script>
+(function () {
+  'use strict';
+  const P = window.LedgerParser;
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const CURRENCIES = ['JOD', 'USD', 'SAR', 'AED', 'EGP', 'KWD', 'QAR', 'BHD', 'OMR', 'EUR', 'GBP', 'TRY', 'MAD', 'ILS', 'INR'];
+  $('#currency').innerHTML = CURRENCIES.map((c) => `<option>${c}</option>`).join('');
+
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-copy]');
+    if (!b) return;
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1500); } catch (err) {}
+  });
+
+  function status(msg, err) {
+    const el = $('#status');
+    el.hidden = false;
+    el.className = 'status' + (err ? ' err' : '');
+    el.innerHTML = msg;
+  }
+
+  // Newer iOS keeps many messages only in attributedBody (an archived NSAttributedString).
+  function textFromAttributedBody(bytes) {
+    if (!bytes || !bytes.length) return '';
+    const marker = [78, 83, 83, 116, 114, 105, 110, 103]; // "NSString"
+    outer: for (let i = 0; i < bytes.length - marker.length; i++) {
+      for (let k = 0; k < marker.length; k++) if (bytes[i + k] !== marker[k]) continue outer;
+      let p = i + marker.length + 5;
+      let len;
+      if (bytes[p] === 0x81) { len = bytes[p + 1] | (bytes[p + 2] << 8); p += 3; }
+      else if (bytes[p] === 0x82) { len = bytes[p + 1] | (bytes[p + 2] << 8) | (bytes[p + 3] << 16) | (bytes[p + 4] << 24); p += 5; }
+      else { len = bytes[p]; p += 1; }
+      return new TextDecoder().decode(bytes.subarray(p, p + len));
+    }
+    return '';
+  }
+  // Message dates count from 2001-01-01, in seconds (old iOS) or nanoseconds (iOS 11+).
+  function appleDate(v) {
+    const n = Number(v);
+    const secs = n > 1e11 ? n / 1e9 : n;
+    return new Date((secs + 978307200) * 1000);
+  }
+
+  let groups = [];
+  const sqlReady = initSqlJs({ locateFile: (f) => 'vendor/sql.js/' + f });
+
+  $('#pickBtn').onclick = () => $('#file').click();
+  $('#currency').onchange = () => { if (lastBuffer) read(lastBuffer); };
+  let lastBuffer = null;
+  $('#file').onchange = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    lastBuffer = await f.arrayBuffer();
+    read(lastBuffer);
+  };
+
+  async function read(buf) {
+    $('#senders').innerHTML = ''; $('#preview').innerHTML = ''; $('#saveStep').hidden = true;
+    const head = buf.byteLength >= 100 ? new TextDecoder().decode(new Uint8Array(buf, 0, 15)) : '';
+    if (head !== 'SQLite format 3') {
+      status('That file isn\'t a readable messages database. Make sure you chose <code>3d0d7e5fb2ce288813306e4d4636395e047a3d28</code> and that the backup is <b>not encrypted</b>. If "Encrypt local backup" was ticked, untick it and back up again.', true);
+      return;
+    }
+    status('Reading messages…');
+    let db;
+    try {
+      const SQL = await sqlReady;
+      db = new SQL.Database(new Uint8Array(buf));
+    } catch (err) { status('Couldn\'t open the file: ' + esc(err.message), true); return; }
+    let rows;
+    try {
+      const cols = db.exec('PRAGMA table_info(message)')[0].values.map((r) => r[1]);
+      const body = cols.includes('attributedBody') ? 'm.attributedBody' : 'NULL';
+      const res = db.exec(`SELECT m.text, ${body}, m.date, IFNULL(h.id, '') FROM message m LEFT JOIN handle h ON h.ROWID = m.handle_id WHERE m.is_from_me = 0`);
+      rows = res.length ? res[0].values : [];
+    } catch (err) { status('This doesn\'t look like the iPhone messages file (' + esc(err.message) + '). Check you chose the right file.', true); return; }
+    finally { db.close(); }
+
+    const currency = $('#currency').value;
+    const bySender = new Map();
+    for (const [text, attr, date, sender] of rows) {
+      const body = text || textFromAttributedBody(attr);
+      if (!body) continue;
+      const t = P.parseMessage(body, { defaultCurrency: currency, receivedAt: appleDate(date).toISOString() });
+      const g = bySender.get(sender) || { sender: sender || 'Unknown sender', messages: 0, txns: [] };
+      g.messages++;
+      if (t) g.txns.push(t);
+      bySender.set(sender, g);
+    }
+    groups = [...bySender.values()].filter((g) => g.txns.length).sort((a, b) => b.txns.length - a.txns.length);
+    if (!groups.length) {
+      status(`Read ${rows.length.toLocaleString()} messages but found no bank transactions in them.`, true);
+      return;
+    }
+    status(`Read ${rows.length.toLocaleString()} messages. These senders sent transactions. Untick any that aren't your bank:`);
+    // Banks text from a name ("ArabBank"); people text from a number. Pre-select names, and numbers that are mostly transactions.
+    $('#senders').innerHTML = groups.map((g, i) => {
+      const isName = !/^[+\d]/.test(g.sender) && !g.sender.includes('@');
+      const on = isName || g.txns.length / g.messages > 0.5;
+      const dates = g.txns.map((t) => t.date).sort();
+      const range = `${new Date(dates[0]).toLocaleDateString()} – ${new Date(dates[dates.length - 1]).toLocaleDateString()}`;
+      return `<label class="sender"><input type="checkbox" data-i="${i}" ${on ? 'checked' : ''}>
+        <span><span class="s1">${esc(g.sender)}</span><br><span class="s2">${g.txns.length} transactions · ${range}</span></span></label>`;
+    }).join('');
+    update();
+  }
+
+  function selected() {
+    return [...document.querySelectorAll('#senders input:checked')].flatMap((c) => groups[+c.dataset.i].txns)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
+  function update() {
+    const txns = selected();
+    $('#saveStep').hidden = !txns.length;
+    $('#saveBtn').disabled = !txns.length;
+    const spent = txns.filter((t) => t.type === 'expense').length;
+    $('#saveSummary').innerHTML = `<b>${txns.length} transactions</b> (${spent} spending, ${txns.length - spent} income) ready for Ledger.`;
+    $('#preview').innerHTML = txns.length ? '<p class="muted">Most recent:</p>' + txns.slice(0, 6).map((t) =>
+      `<div><span>${new Date(t.date).toLocaleDateString()} · ${esc(t.merchant || t.category)}</span><span>${t.type === 'income' ? '+' : '−'}${t.currency} ${t.amount}</span></div>`).join('') : '';
+  }
+  $('#senders').addEventListener('change', update);
+
+  $('#saveBtn').onclick = () => {
+    const data = { app: 'ledger', kind: 'history', exportedAt: new Date().toISOString(), txns: selected(), settings: { rules: {} } };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+    a.download = 'ledger-history.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  };
+})();
+</script>
+</body>
+</html>
