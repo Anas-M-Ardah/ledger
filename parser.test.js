@@ -155,3 +155,55 @@ test('Arab Bank CliQ incoming transfer (words glued to numbers)', () => {
   assert.equal(t.category, 'Transfers');
   assert.equal(t.account, '456');
 });
+
+// Dates like 08/11/2026 are ambiguous (8 Nov or Aug 11). Use when the SMS arrived to decide.
+test('ambiguous dates: pick the reading that fits when the SMS arrived', () => {
+  const msg = 'You have a purchase transaction on account 0123*456 from TEST RES amount JOD 3.000 on 08/11/2026 15:50 . Balance JOD 500.000';
+  const day = (t) => t.date.slice(0, 10);
+  const exact = (at) => parseMessage(msg, { receivedAt: at, exactTime: true });
+  assert.equal(day(exact('2026-11-08T15:51:00Z')), '2026-11-08'); // arrived 8 Nov: day/month
+  assert.equal(exact('2026-11-08T15:51:00Z').dateOrder, 'dm');
+  assert.equal(day(exact('2026-08-11T15:51:00Z')), '2026-08-11'); // arrived 11 Aug: month/day
+  assert.equal(exact('2026-08-11T15:51:00Z').dateOrder, 'md');
+  assert.equal(day(parseMessage(msg, { receivedAt: '2026-11-06T10:00:00Z' })), '2026-08-11'); // 8 Nov would be in the future
+  const old = 'Purchase of JOD 4.000 at TEST SHOP on 03/04/2026 10:00';
+  assert.equal(day(parseMessage(old, { receivedAt: '2026-11-08T10:00:00Z' })), '2026-04-03'); // pasted much later: day/month by default
+});
+
+test('keeps when the message was received, for ordering balances', () => {
+  const t = parseMessage('Purchase of JOD 4.000 at TEST SHOP on 03/04/2026 10:00', { receivedAt: '2026-11-08T10:00:00.000Z' });
+  assert.equal(t.receivedAt, '2026-11-08T10:00:00.000Z');
+});
+
+test('parseBulk keeps paste order in receivedAt', () => {
+  const { parseBulk } = require('./parser.js');
+  const r = parseBulk('Purchase of JOD 1.000 at A\n\nPurchase of JOD 2.000 at B', { receivedAt: '2026-11-08T10:00:00.000Z' });
+  assert.ok(r[1].txn.receivedAt > r[0].txn.receivedAt);
+});
+
+test('a date a few hours ahead is clock skew, not month/day', () => {
+  const t = parseMessage('Purchase of JOD 4.000 at TEST SHOP on 08/11/2026 15:50', { receivedAt: '2026-11-08T09:30:00.000Z' });
+  assert.equal(t.date, '2026-11-08T09:30:00.000Z');
+});
+
+test('learned month/day order is used for pasted messages', () => {
+  const t = parseMessage('Purchase of JOD 4.000 at TEST SHOP on 03/04/2026 10:00', { receivedAt: '2026-11-08T10:00:00Z', dateOrder: 'md' });
+  assert.equal(t.date.slice(0, 10), '2026-03-04');
+});
+
+test('a day above 12 proves the order', () => {
+  assert.equal(parseMessage('Purchase of JOD 4.000 at TEST SHOP on 25/10/2026 10:00', { receivedAt: '2026-11-08T10:00:00Z' }).dateOrder, 'dm');
+  assert.equal(parseMessage('Purchase of JOD 4.000 at TEST SHOP on 10/25/2026 10:00', { receivedAt: '2026-11-08T10:00:00Z' }).dateOrder, 'md');
+});
+
+test('pasting an old message today does not move it to today', () => {
+  // 11/08 = 11 Aug (day/month); month/day would be 8 Nov = today. Without proof, keep the default order.
+  const t = parseMessage('Purchase of JOD 4.000 at TEST SHOP on 11/08/2026 10:00', { receivedAt: '2026-11-08T12:00:00Z' });
+  assert.equal(t.date.slice(0, 10), '2026-08-11');
+});
+
+test('a date days in the future proves the other order', () => {
+  const t = parseMessage('Purchase of JOD 4.000 at TEST SHOP on 08/11/2026 15:50', { receivedAt: '2026-11-06T10:00:00Z' });
+  assert.equal(t.date.slice(0, 10), '2026-08-11');
+  assert.equal(t.dateOrder, 'md');
+});

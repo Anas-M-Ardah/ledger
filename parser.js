@@ -208,29 +208,52 @@
 
   const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
-  function detectDate(text, fallback) {
+  // Returns { iso, order }. `order` is evidence of how this bank writes dates ('dm' day/month or 'md'
+  // month/day), only when the message proves it: a day above 12, or an exact arrival time that fits
+  // only one reading. `prefer` is the order learned so far; `exact` means `fallback` is when the SMS arrived.
+  function detectDate(text, fallback, prefer, exact) {
     const fb = new Date(fallback);
-    let y, mo, d;
+    const out = (dt, order) => ({ iso: (dt || fb).toISOString(), order: order || null });
+    let y, mo, d, dm = null, md = null, evidence = null;
     let m = /\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/.exec(text);
     if (m) { y = +m[1]; mo = +m[2] - 1; d = +m[3]; }
     if (y === undefined && (m = /\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})\b/.exec(text))) {
-      let a = +m[1], b = +m[2];
+      const a = +m[1], b = +m[2];
       y = +m[3] < 100 ? 2000 + +m[3] : +m[3];
-      if (b > 12 && a <= 12) { mo = a - 1; d = b; } else { d = a; mo = b - 1; } // day-first, as most banks outside the US
+      if (a > 12 && b <= 12) evidence = 'dm';
+      else if (b > 12 && a <= 12) evidence = 'md';
+      dm = { mo: b - 1, d: a };
+      md = { mo: a - 1, d: b };
     }
     if (y === undefined && (m = /\b(\d{1,2})[\s-]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s-,]*(\d{4}|\d{2})?\b/i.exec(text))) {
       d = +m[1]; mo = MONTHS[m[2].toLowerCase()];
       y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : fb.getFullYear();
     }
-    if (y === undefined) return fb.toISOString();
+    if (y === undefined) return out(null);
     const t = /\b(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm|ص|م)?/i.exec(text);
     let hh = t ? +t[1] : 12, mm = t ? +t[2] : 0;
     if (t && t[3]) { const pm = /pm|م/i.test(t[3]); if (pm && hh < 12) hh += 12; if (!pm && hh === 12) hh = 0; }
-    const date = new Date(y, mo, d, hh, mm);
-    const valid = date.getMonth() === mo && date.getDate() === d;
-    const tooNew = date - fb > 2 * 864e5;
-    const tooOld = fb - date > 10 * 365 * 864e5;
-    return valid && !tooNew && !tooOld ? date.toISOString() : fb.toISOString();
+
+    const raw = (p) => new Date(y, p.mo, p.d, hh, mm);
+    const real = (p) => { const r = raw(p); return r.getMonth() === p.mo && r.getDate() === p.d; };
+    // A bank texts right after the transaction: the date can't be after the SMS arrived (1h slack) or years before.
+    const ok = (p) => real(p) && raw(p) - fb <= 36e5 && fb - raw(p) <= 10 * 365 * 864e5;
+    const near = (p) => ok(p) && fb - raw(p) <= 3 * 864e5;
+
+    if (!dm) { const p = { mo, d }; return ok(p) ? out(raw(p)) : out(null); } // year-first or month name: not ambiguous
+
+    if (evidence) { const p = evidence === 'dm' ? dm : md; return ok(p) ? out(raw(p), evidence) : out(null, evidence); }
+    if (dm.mo === md.mo && dm.d === md.d) return ok(dm) ? out(raw(dm)) : out(null); // e.g. 05/05
+
+    if (exact && near(dm) !== near(md)) return near(dm) ? out(raw(dm), 'dm') : out(raw(md), 'md');
+    const first = prefer === 'md' ? md : dm, second = first === dm ? md : dm;
+    // Only hours ahead: a clock or timezone difference, not a misread date.
+    const ahead = raw(first) - fb;
+    if (real(first) && ahead > 36e5 && ahead <= 864e5) return out(null);
+    if (ok(first)) return out(raw(first));
+    // The preferred reading is days in the future, so the bank must write dates the other way round.
+    if (ok(second)) return out(raw(second), real(first) && ahead > 864e5 ? (second === dm ? 'dm' : 'md') : null);
+    return out(null);
   }
 
   // ---------- public API ----------
@@ -252,6 +275,7 @@
     const bal = amounts.find((a) => a.isBalance && a.index > txnAmount.index && a.currency === txnAmount.currency)
       || amounts.find((a) => a.isBalance && a.currency === txnAmount.currency);
     const merchant = detectMerchant(text, type);
+    const when = detectDate(text, receivedAt, opts.dateOrder, !!opts.exactTime);
     return {
       id: hash(text),
       amount: Math.round(txnAmount.amount * 1000) / 1000,
@@ -262,7 +286,10 @@
       type,
       merchant,
       category: detectCategory(text, merchant, type),
-      date: detectDate(text, receivedAt),
+      date: when.iso,
+      ...(when.order ? { dateOrder: when.order } : {}),
+      ...(opts.exactTime ? { exact: true } : {}),
+      receivedAt: new Date(receivedAt).toISOString(),
       raw: text,
     };
   }
@@ -282,13 +309,15 @@
   }
 
   function parseBulk(bulk, opts) {
-    return splitMessages(bulk).map((raw) => ({ raw, txn: parseMessage(raw, opts) }));
+    // Messages later in the paste/inbox arrived later: keep that order in receivedAt.
+    const base = +new Date((opts && opts.receivedAt) || Date.now());
+    return splitMessages(bulk).map((raw, i) => ({ raw, txn: parseMessage(raw, { ...opts, receivedAt: new Date(base + i).toISOString() }) }));
   }
 
   // True if the text mentions an amount of money at all (used to tell "not a bank message" from "couldn't read").
   const looksLikeMoney = (text) => findAmounts(normalize(text), 'USD').length > 0;
 
-  const VERSION = 3;
+  const VERSION = 5;
   const api = { VERSION, parseMessage, parseBulk, splitMessages, looksLikeMoney, normalize, CATEGORIES, CATEGORY_ICONS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LedgerParser = api;

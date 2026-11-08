@@ -200,7 +200,7 @@ select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px soli
     for (const [text, attr, date, sender] of rows) {
       const body = text || textFromAttributedBody(attr);
       if (!body) continue;
-      const t = P.parseMessage(body, { defaultCurrency: currency, receivedAt: appleDate(date).toISOString() });
+      const t = P.parseMessage(body, { defaultCurrency: currency, receivedAt: appleDate(date).toISOString(), exactTime: true });
       const g = bySender.get(sender) || { sender: sender || 'Unknown sender', messages: 0, txns: [] };
       g.messages++;
       if (t) g.txns.push(t);

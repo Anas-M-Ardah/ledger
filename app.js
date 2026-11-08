@@ -36,13 +36,20 @@
   if ((db.parserVersion || 1) < P.VERSION) {
     for (const t of db.txns) {
       if (!t.raw || t.edited) continue;
-      const n = P.parseMessage(t.raw, { defaultCurrency: t.currency, receivedAt: t.date });
+      const future = new Date(t.date) - Date.now() > 36e5;
+      const n = P.parseMessage(t.raw, {
+        defaultCurrency: t.currency, dateOrder: db.settings.dateOrder, exactTime: !!t.exact,
+        receivedAt: t.receivedAt || (future ? new Date().toISOString() : t.date),
+      });
       if (!n || n.type !== t.type || n.amount !== t.amount) continue;
       Object.assign(t, { merchant: n.merchant, category: n.category, account: n.account });
+      if (future || n.dateOrder) t.date = n.date; // misread before, or the message itself proves its date
+      if (n.dateOrder && !t.sample) t.dateOrder = n.dateOrder;
       if (n.balance != null) t.balance = n.balance;
       applyRules(t);
     }
     db.parserVersion = P.VERSION;
+    learnDateOrder();
     save();
   }
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
@@ -100,6 +107,22 @@
     for (const t of list) if (t.currencyGuessed) t.currency = db.settings.currencyChosen ? db.settings.currency : fallback;
     return list;
   }
+  // Banks write 08/11 as day/month or month/day. Learn which from messages that prove it
+  // (a day above 12, an exact arrival time, an impossible future date), then re-date the rest.
+  function learnDateOrder() {
+    const votes = { dm: 0, md: 0 };
+    for (const t of db.txns) if (t.dateOrder && !t.sample) votes[t.dateOrder]++;
+    const order = votes.md > votes.dm ? 'md' : votes.dm > votes.md ? 'dm' : db.settings.dateOrder;
+    if (!order || order === db.settings.dateOrder) return 0;
+    db.settings.dateOrder = order;
+    let n = 0;
+    for (const t of db.txns) {
+      if (!t.raw || t.edited || t.exact || t.dateOrder || t.sample) continue;
+      const r = P.parseMessage(t.raw, { defaultCurrency: t.currency, receivedAt: t.receivedAt || new Date().toISOString(), dateOrder: order });
+      if (r && r.date !== t.date) { t.date = r.date; n++; }
+    }
+    return n;
+  }
   function addTxns(list) {
     resolveCurrencies(list);
     const ids = new Set(db.txns.map((t) => t.id));
@@ -110,37 +133,41 @@
       db.txns.push(applyRules({ ...t }));
       added++;
     }
+    learnDateOrder();
     db.txns.sort((a, b) => new Date(b.date) - new Date(a.date));
     save();
     return added;
   }
-  const parseOpts = () => ({ defaultCurrency: db.settings.currency, receivedAt: new Date().toISOString() });
+  const parseOpts = () => ({ defaultCurrency: db.settings.currency, dateOrder: db.settings.dateOrder, receivedAt: new Date().toISOString() });
 
   // ---------- balance ----------
   // Latest known balance (from an SMS that included it, or one you entered), plus every transaction after it.
   // Kept per account (card/account last digits); messages without digits count toward your main account.
   const round3 = (x) => Math.round(x * 1000) / 1000;
+  const sameAs = (a) => (a && (db.settings.sameAccount || {})[a]) || a;
   function balances(cur) {
     const txns = db.txns.filter((t) => t.currency === cur);
     const manual = db.balances.filter((b) => b.currency === cur);
     const counts = {};
-    for (const t of txns) if (t.account) counts[t.account] = (counts[t.account] || 0) + 1;
-    for (const b of manual) if (b.account && !(b.account in counts)) counts[b.account] = 0;
+    for (const t of txns) if (t.account) counts[sameAs(t.account)] = (counts[sameAs(t.account)] || 0) + 1;
+    for (const b of manual) if (b.account && !(sameAs(b.account) in counts)) counts[sameAs(b.account)] = 0;
     const accounts = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
     const main = accounts[0] || '';
     const groups = {};
     for (const a of accounts.length ? accounts : ['']) groups[a] = { account: a, txns: [], readings: [] };
-    const groupOf = (acc) => groups[acc || main] || groups[main];
+    const groupOf = (acc) => groups[sameAs(acc) || main] || groups[main];
     for (const t of txns) {
       const g = groupOf(t.account);
       g.txns.push(t);
-      if (t.balance != null) g.readings.push({ amount: t.balance, date: t.date, source: 'sms', id: t.id });
+      if (t.balance != null) g.readings.push({ amount: t.balance, date: t.date, rx: t.receivedAt || '', source: 'sms', id: t.id });
     }
     for (const b of manual) groupOf(b.account).readings.push({ amount: b.amount, date: b.date, source: 'manual' });
     return Object.values(groups).map((g) => {
-      const r = g.readings.sort((a, b) => new Date(b.date) - new Date(a.date) || (a.source === 'manual' ? -1 : 1))[0];
+      // Newest by transaction date; same moment: the one that arrived later; a balance you typed wins a tie.
+      const r = g.readings.sort((a, b) => new Date(b.date) - new Date(a.date) || (b.rx || '').localeCompare(a.rx || '') || (a.source === 'manual' ? -1 : 1))[0];
       if (!r) return { account: g.account, balance: null };
-      const after = g.txns.filter((t) => t.id !== r.id && new Date(t.date) > new Date(r.date));
+      const later = (t) => new Date(t.date) - new Date(r.date) || (r.rx && t.receivedAt ? t.receivedAt.localeCompare(r.rx) : 0);
+      const after = g.txns.filter((t) => t.id !== r.id && later(t) > 0);
       const delta = after.reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
       return { account: g.account, balance: round3(r.amount + delta), reading: r, since: after.length };
     });
@@ -172,14 +199,23 @@
     $('#balanceInputs').innerHTML = list.map((b, i) => `
       <label class="f" for="bal${i}">${esc(acctName(b, list.length > 1))} (${state.currency}) right now</label>
       <input id="bal${i}" data-account="${esc(b.account)}" data-was="${b.balance ?? ''}" type="number" inputmode="decimal" step="any"
-        value="${b.balance ?? ''}" placeholder="e.g. 1240.500">`).join('');
+        value="${b.balance ?? ''}" placeholder="e.g. 1240.500">
+      ${i > 0 && list[0].account ? `<label class="check"><input type="checkbox" data-merge="${esc(b.account)}" data-into="${esc(list[0].account)}">
+        <span>Same money as ··${esc(list[0].account)} (e.g. its debit card). Show one balance</span></label>` : ''}`).join('');
     open('balance');
   }
   $('#balanceCard').onclick = openBalance;
   $('#balanceForm').addEventListener('submit', (e) => {
     e.preventDefault();
     let n = 0;
-    for (const inp of $$('#balanceInputs input')) {
+    let merged = 0;
+    for (const c of $$('#balanceInputs [data-merge]:checked')) {
+      db.settings.sameAccount = db.settings.sameAccount || {};
+      db.settings.sameAccount[c.dataset.merge] = c.dataset.into;
+      merged++;
+    }
+    for (const inp of $$('#balanceInputs input[type=number]')) {
+      if (merged && inp.dataset.account && sameAs(inp.dataset.account) !== inp.dataset.account) continue;
       if (inp.value === '') continue;
       const v = parseFloat(inp.value);
       if (!isFinite(v) || (inp.dataset.was !== '' && Math.abs(v - +inp.dataset.was) < 0.0005)) continue;
@@ -189,7 +225,7 @@
     save();
     sheets.balance.close();
     render();
-    if (n) toast('Balance saved');
+    if (merged || n) toast(merged ? 'Combined into one balance' : 'Balance saved');
   });
 
   // ---------- sync from the Shortcut inbox ----------
@@ -717,14 +753,24 @@
     try {
       const data = JSON.parse(await f.text());
       if (!Array.isArray(data.txns)) throw new Error('bad file');
+      const byId = new Map(db.txns.map((t) => [t.id, t]));
+      let fixed = 0;
+      for (const t of data.txns) {
+        const old = t && byId.get(t.id);
+        if (!old || old.edited || !t.exact) continue;
+        if (old.date !== t.date) fixed++;
+        Object.assign(old, { date: t.date, receivedAt: t.receivedAt, exact: true });
+        if (t.dateOrder) old.dateOrder = t.dateOrder;
+      }
       const n = addTxns(data.txns.filter((t) => t && t.id && t.amount > 0 && t.date));
+      fixed += learnDateOrder();
       Object.assign(db.settings.rules, (data.settings && data.settings.rules) || {});
       const have = new Set(db.balances.map((b) => b.currency + b.account + b.date));
       for (const b of Array.isArray(data.balances) ? data.balances : []) {
         if (b && b.currency && isFinite(b.amount) && b.date && !have.has(b.currency + b.account + b.date)) db.balances.push(b);
       }
       save(); render(); fillSettings();
-      toast(`Imported ${n} new transaction${n === 1 ? '' : 's'}`);
+      toast(`Imported ${n} new transaction${n === 1 ? '' : 's'}` + (fixed ? ` · corrected ${fixed} date${fixed === 1 ? '' : 's'}` : ''));
     } catch (err) { toast("That file isn't a Ledger backup"); }
     e.target.value = '';
   };
@@ -767,7 +813,10 @@
     for (let back = 3; back >= 0; back--) {
       const m = new Date(now.getFullYear(), now.getMonth() - back, 1);
       const lastDay = back === 0 ? now.getDate() : new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
-      const at = (day) => new Date(m.getFullYear(), m.getMonth(), Math.min(day, lastDay), 8 + Math.floor(Math.random() * 13), Math.floor(Math.random() * 60));
+      const at = (day) => {
+        const d = new Date(m.getFullYear(), m.getMonth(), Math.min(day, lastDay), 8 + Math.floor(Math.random() * 13), Math.floor(Math.random() * 60));
+        return d > now ? new Date(now - Math.random() * 36e5) : d; // never in the future
+      };
       events.push([at(1), 'Your account 4821 has been credited with {c} {a} SALARY from ACME TRADING on {d}', 1450, true]);
       if (Math.random() > .4) events.push([at(1 + Math.floor(Math.random() * 27)), 'Transfer received {c} {a} from SARA K. to account 4821 on {d}', rnd(50, 200), true]);
       for (const [tpl, lo, hi, n] of templates) {
@@ -784,7 +833,7 @@
       return (tpl + bal).replace(/\{c\}/g, cur).replace('{a}', amt.toFixed(2)).replace('{d}', fmt(d));
     });
     window.__sampleFinalBalance = running; // for tests
-    const list = msgs.map((s) => P.parseMessage(s, parseOpts())).filter(Boolean).map((t) => ({ ...t, sample: true }));
+    const list = msgs.map((s) => P.parseMessage(s, { ...parseOpts(), dateOrder: 'dm' })).filter(Boolean).map((t) => ({ ...t, sample: true }));
     const n = addTxns(list);
     state.currency = cur;
     state.month = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -841,7 +890,7 @@
     try { text = decodeURIComponent(text.replace(/\+/g, ' ')); } catch (e) {}
     history.replaceState(null, '', location.pathname);
     Object.values(sheets).forEach((d) => d.open && d.close()); // show the dashboard for the new message
-    const t = P.parseMessage(text, parseOpts());
+    const t = P.parseMessage(text, { ...parseOpts(), exactTime: true }); // the automation opened us as the SMS arrived
     if (!t) {
       // The automation also fires for unrelated texts containing its keyword. Skip those quietly;
       // only bring up the paste screen when the message mentions money but couldn't be read.
