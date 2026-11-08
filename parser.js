@@ -163,18 +163,18 @@
     return inc.index < exp.index ? 'income' : 'expense';
   }
 
-  const STOP_EN = '(?=\\s+[A-Za-z]{3}\\s?\\d|\\s+[$€£]|\\s+(?:amount|amt|value|on|using|via|with|for|from|card|ref|reference|avl|available|bal|balance|date|at|is|has|your|\\d{1,2}[\\/\\-.]\\d)\\b|\\s*[.,;:|\\n(]|\\s+\\d|\\s*$)';
+  const STOP_EN = '(?=\\s+as\\s+(?:cliq|transfer|payment|salary|refund|reversal)\\b|\\s+[A-Za-z]{3}\\s?\\d|\\s+[$€£]|\\s+(?:amount|amt|value|on|using|via|with|for|from|card|ref|reference|avl|available|bal|balance|date|at|is|has|your|\\d{1,2}[\\/\\-.]\\d)\\b|\\s*[.,;:|\\n(]|\\s+\\d|\\s*$)';
   const STOP_AR = '(?=\\s+(?:بتاريخ|في تاريخ|تاريخ|رصيد|الرصيد|المتاح|بطاقة|البطاقة|رقم|بواسطة|عبر|من خلال|الساعة|يوم)|\\s*[.,؛،:|\\n(]|\\s+\\d|\\s*$)';
   const MERCHANT_PATTERNS = {
     expense: [
       new RegExp(`\\b(?:at|@)\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
       new RegExp(`\\b(?:to|paid to|sent to|transfer(?:red)? to)\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
       new RegExp(`\\bfor\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
-      new RegExp(`\\bfrom\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
+      new RegExp(`(?:\\b|(?<=\\d))from\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
       new RegExp(`(?:لدى|لدي|عند|لصالح|إلى|الى|في)\\s+([^\\n]{2,40}?)${STOP_AR}`),
     ],
     income: [
-      new RegExp(`\\b(?:from|by)\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
+      new RegExp(`(?:\\b|(?<=\\d))(?:from|by)\\s+([A-Za-z0-9][^\\n]{1,40}?)${STOP_EN}`, 'i'),
       new RegExp(`(?:من|بواسطة)\\s+([^\\n]{2,40}?)${STOP_AR}`),
     ],
   };
@@ -202,7 +202,7 @@
   // Last 4 digits of the card/account the message is about ("card ending 1234", "a/c XX4521", "حسابك رقم ***8812").
   const RE_ACCOUNT = /(?:card|a\/c|acc(?:oun)?t?|ending|بطاقة|بطاقتك|البطاقة|حساب|حسابك|الحساب)[^\d\n]{0,20}?[*xX•.\s]*((?:\d+[*xX•]+)*\d{3,})(?!\d)/i;
   function detectAccount(text) {
-    const m = RE_ACCOUNT.exec(text);
+    const m = RE_ACCOUNT.exec(text) || /(?:^|[^\d])(\d{2,}[*•]+\d{3,})(?!\d)/.exec(text);
     return m ? m[1].split(/[*xX•]+/).pop().slice(-4) : '';
   }
 
@@ -288,7 +288,7 @@
   // True if the text mentions an amount of money at all (used to tell "not a bank message" from "couldn't read").
   const looksLikeMoney = (text) => findAmounts(normalize(text), 'USD').length > 0;
 
-  const VERSION = 2;
+  const VERSION = 3;
   const api = { VERSION, parseMessage, parseBulk, splitMessages, looksLikeMoney, normalize, CATEGORIES, CATEGORY_ICONS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LedgerParser = api;

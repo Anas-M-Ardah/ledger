@@ -527,7 +527,7 @@ code.url { display: block; font: 13px ui-monospace, Menlo, monospace; background
       <p>iPhone apps can't read your texts, but a Shortcuts automation can collect every bank SMS as it arrives. Then tap <b>↻ Sync</b> (top right) when you open Ledger.</p>
       <ol class="steps">
         <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>Message</b>.</li>
-        <li>Leave <b>Sender</b> empty (banks like Arab Bank text from a name, not a contact). Set <b>Message Contains</b> to <b>JOD</b> (or <b>دينار</b> for Arabic alerts; one automation per word). Choose <b>Run Immediately</b> and turn off <b>Notify When Run</b>.</li>
+        <li>Leave <b>Sender</b> empty (banks like Arab Bank text from a name, not a contact). Set <b>Message Contains</b> to <b>Balance</b>. Arab Bank puts it in every alert as a separate word, while "JOD" is often glued to the amount ("JOD10.000") and doesn't match. For Arabic alerts add a second automation with <b>الرصيد</b>. Choose <b>Run Immediately</b> and turn off <b>Notify When Run</b>.</li>
         <li>Add <b>Append to Text File</b>. In its text box type <code>---</code>, start a new line, and insert <b>Shortcut Input</b>. Set the file to <code>Ledger inbox.txt</code> and turn on <b>Make New Line</b>.</li>
         <li>Add <b>Get File from Folder</b>: folder <b>Shortcuts</b>, path <code>Ledger inbox.txt</code>.</li>
         <li>Add <b>Copy to Clipboard</b>. It copies the file from step 4. Done.</li>
